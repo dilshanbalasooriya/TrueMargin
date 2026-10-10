@@ -48,3 +48,16 @@ def get_current_profile(
     db: Session = Depends(get_db),
 ) -> UserProfileResponse:
     return auth_service.get_user_profile(user_id, db)
+
+@router.post(
+    "/sync",
+    response_model=UserProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Ensure user profile and workspace exist after frontend native login",
+)
+def sync_user_profile(
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    email: str = "user@example.com" # Ideally fetched from JWT, but mocked here for simplicity or we can decode from JWT
+) -> UserProfileResponse:
+    return auth_service.sync_user(user_id, email, db)

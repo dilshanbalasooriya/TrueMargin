@@ -173,5 +173,27 @@ class AuthService:
             workspaces=workspaces_list,
         )
 
+    def sync_user(self, user_id: uuid.UUID, email: str, db: Session) -> UserProfileResponse:
+        """Called by the frontend after Supabase native login to ensure Profile and Workspace exist."""
+        profile = db.get(Profile, user_id)
+        if not profile:
+            try:
+                # Bootstrap profile and workspace for users who logged in via OAuth/Magic Link
+                display_name = email.split('@')[0]
+                profile = Profile(id=user_id, display_name=display_name, country="US", currency="USD")
+                db.add(profile)
+                
+                default_workspace = Workspace(owner_id=user_id, name=f"{display_name}'s Workspace", country="US", currency="USD")
+                db.add(default_workspace)
+                db.flush()
+                
+                membership = WorkspaceMember(workspace_id=default_workspace.id, user_id=user_id, role="owner")
+                db.add(membership)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(status_code=500, detail=f"Failed to sync user: {str(e)}")
+        
+        return self.get_user_profile(user_id, db)
 
 auth_service = AuthService()
