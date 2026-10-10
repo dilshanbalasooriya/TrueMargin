@@ -12,6 +12,8 @@ export interface GuestDraft {
   productName: string;
   unitsProduced: string;
   buckets: Record<string, Bucket>;
+  sheetId?: string;
+  workspaceId?: string;
 }
 
 interface CalculatorState {

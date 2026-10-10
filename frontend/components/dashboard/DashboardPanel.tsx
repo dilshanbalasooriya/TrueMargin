@@ -1,13 +1,51 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useCalculatorStore } from '@/store/useCalculatorStore';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { LoginModal } from '@/components/auth/LoginModal';
+import { syncUserProfile, saveCostSheet } from '@/lib/api-client';
+import { Loader2 } from 'lucide-react';
 
 export function DashboardPanel() {
-  const { draft } = useCalculatorStore();
+  const { draft, updateDraft } = useCalculatorStore();
   const { user } = useAuth();
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      let wid = draft.workspaceId;
+      
+      // If we don't know the workspace ID yet, fetch it from /sync
+      if (!wid) {
+        const profile = await syncUserProfile();
+        if (profile.workspaces && profile.workspaces.length > 0) {
+          wid = profile.workspaces[0].id;
+          updateDraft({ workspaceId: wid });
+        } else {
+          throw new Error("No workspace found for user.");
+        }
+      }
+
+      // Save to FastAPI
+      const response = await saveCostSheet(draft, wid!);
+      
+      // Update store with the returned sheet_id so future saves create a version instead of a new sheet
+      if (response.id && !draft.sheetId) {
+        updateDraft({ sheetId: response.id });
+      }
+      if (response.sheet_id && !draft.sheetId) {
+         updateDraft({ sheetId: response.sheet_id });
+      }
+      
+      alert("Cost sheet saved successfully!");
+    } catch (err: any) {
+      alert("Failed to save: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const totalCost = Object.values(draft.buckets).reduce((acc, curr) => {
     const val = parseFloat(curr.totalSpent);
@@ -43,8 +81,12 @@ export function DashboardPanel() {
               </Button>
             </LoginModal>
           ) : (
-            <Button className="w-full font-bold shadow-md h-12 text-md transition-all hover:-translate-y-0.5">
-              Save Changes
+            <Button 
+              onClick={handleSave} 
+              disabled={saving}
+              className="w-full font-bold shadow-md h-12 text-md transition-all hover:-translate-y-0.5"
+            >
+              {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save Changes"}
             </Button>
           )}
         </CardFooter>
