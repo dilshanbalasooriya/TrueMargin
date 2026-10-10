@@ -6,37 +6,36 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { Mail, Loader2 } from 'lucide-react';
-import { useCalculatorStore } from '@/store/useCalculatorStore';
+import { Mail, Loader2, Lock } from 'lucide-react';
 
 export function LoginModal({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const supabase = createClient();
-  const { draft } = useCalculatorStore();
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     
-    // We send them back to where they were, or root
-    const redirectUrl = `${window.location.origin}/auth/confirm`;
-    
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: redirectUrl,
-      },
-    });
-
-    if (error) {
-      setError(error.message);
+    if (isSignUp) {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+      if (error) setError(error.message);
+      else window.location.reload(); // Refresh to catch new session
     } else {
-      setSent(true);
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) setError(error.message);
+      else window.location.reload(); // Refresh to catch new session
     }
     setLoading(false);
   };
@@ -49,7 +48,6 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
-    // no need to set loading false here as page redirects
   };
 
   return (
@@ -57,9 +55,13 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
       <DialogTrigger render={children as React.ReactElement} />
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold tracking-tight">Sign in to save</DialogTitle>
+          <DialogTitle className="text-2xl font-bold tracking-tight">
+            {isSignUp ? 'Create an account' : 'Sign in to save'}
+          </DialogTitle>
           <DialogDescription>
-            Create an account or sign in to save your cost calculations and access them anywhere.
+            {isSignUp 
+              ? 'Create a new account to save your costings securely.'
+              : 'Sign in to save your cost calculations and access them anywhere.'}
           </DialogDescription>
         </DialogHeader>
         
@@ -92,12 +94,8 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {sent ? (
-            <div className="bg-primary/10 text-primary p-4 rounded-lg text-sm font-medium text-center border border-primary/20">
-              Check your email for the magic link! You can close this window.
-            </div>
-          ) : (
-            <form onSubmit={handleEmailLogin} className="flex flex-col gap-3">
+          <form onSubmit={handleEmailAuth} className="flex flex-col gap-3">
+            <div className="space-y-2">
               <Input 
                 type="email" 
                 placeholder="name@example.com" 
@@ -106,13 +104,32 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
                 required
                 className="h-12"
               />
-              {error && <div className="text-destructive text-sm font-medium">{error}</div>}
-              <Button type="submit" className="h-12 font-medium" disabled={loading || !email}>
-                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mail className="h-5 w-5 mr-2" />}
-                Send Magic Link
-              </Button>
-            </form>
-          )}
+              <Input 
+                type="password" 
+                placeholder="Password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="h-12"
+              />
+            </div>
+            {error && <div className="text-destructive text-sm font-medium">{error}</div>}
+            
+            <Button type="submit" className="h-12 font-medium" disabled={loading || !email || !password}>
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (isSignUp ? "Sign Up" : "Sign In")}
+            </Button>
+          </form>
+          
+          <div className="text-center text-sm text-muted-foreground mt-2">
+            {isSignUp ? "Already have an account? " : "Don't have an account? "}
+            <button 
+              type="button" 
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-primary hover:underline font-medium"
+            >
+              {isSignUp ? 'Sign In' : 'Sign Up'}
+            </button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
