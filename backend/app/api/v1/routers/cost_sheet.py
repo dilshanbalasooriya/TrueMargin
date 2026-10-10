@@ -92,20 +92,6 @@ def list_version_history(
 
 
 @router.get(
-    "/cost-sheets/versions/{version_id}",
-    response_model=SheetVersionDetailResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Get detailed snapshot of a specific version",
-)
-def get_version_detail(
-    version_id: uuid.UUID,
-    user_id: uuid.UUID = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-) -> SheetVersionDetailResponse:
-    return cost_sheet_service.get_version_detail(version_id, user_id, db)
-
-
-@router.get(
     "/cost-sheets/versions/compare",
     response_model=VersionCompareResponse,
     status_code=status.HTTP_200_OK,
@@ -118,6 +104,20 @@ def compare_versions(
     db: Session = Depends(get_db),
 ) -> VersionCompareResponse:
     return cost_sheet_service.compare_versions(v1_id, v2_id, user_id, db)
+
+
+@router.get(
+    "/cost-sheets/versions/{version_id}",
+    response_model=SheetVersionDetailResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get detailed snapshot of a specific version",
+)
+def get_version_detail(
+    version_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> SheetVersionDetailResponse:
+    return cost_sheet_service.get_version_detail(version_id, user_id, db)
 
 
 @router.post(

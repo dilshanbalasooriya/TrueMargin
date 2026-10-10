@@ -37,7 +37,7 @@ class AssetCreate(BaseModel):
     name: str = Field(..., min_length=1)
     purchase_price: Decimal
     salvage_value: Decimal = Decimal("0")
-    useful_life_years: Optional[Decimal] = 5
+    useful_life_years: Optional[Decimal] = Decimal("5")
     lifetime_capacity_units: Optional[Decimal] = None
     default_depreciation_method: str = "straight_line_time"
 
