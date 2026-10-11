@@ -16,6 +16,11 @@ class UserLoginRequest(BaseModel):
     password: str
 
 
+class UserSyncRequest(BaseModel):
+    display_name: Optional[str] = None
+    currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     refresh_token: str

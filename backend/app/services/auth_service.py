@@ -173,17 +173,35 @@ class AuthService:
             workspaces=workspaces_list,
         )
 
-    def sync_user(self, user_id: uuid.UUID, email: str, db: Session) -> UserProfileResponse:
+    def sync_user(
+        self,
+        user_id: uuid.UUID,
+        email: str,
+        db: Session,
+        display_name: Optional[str] = None,
+        currency: Optional[str] = None,
+    ) -> UserProfileResponse:
         """Called by the frontend after Supabase native login to ensure Profile and Workspace exist."""
         profile = db.get(Profile, user_id)
         if not profile:
             try:
                 # Bootstrap profile and workspace for users who logged in via OAuth/Magic Link
-                display_name = email.split('@')[0]
-                profile = Profile(id=user_id, display_name=display_name, country="US", currency="USD")
+                resolved_name = display_name or email.split('@')[0]
+                resolved_currency = currency or "LKR"
+                profile = Profile(
+                    id=user_id,
+                    display_name=resolved_name,
+                    country="LK",
+                    currency=resolved_currency,
+                )
                 db.add(profile)
                 
-                default_workspace = Workspace(owner_id=user_id, name=f"{display_name}'s Workspace", country="US", currency="USD")
+                default_workspace = Workspace(
+                    owner_id=user_id,
+                    name=f"{resolved_name}'s Workspace",
+                    country="LK",
+                    currency=resolved_currency,
+                )
                 db.add(default_workspace)
                 db.flush()
                 

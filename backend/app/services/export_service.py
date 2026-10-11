@@ -1,4 +1,5 @@
 import csv
+from html import escape
 import io
 import uuid
 from decimal import Decimal
@@ -12,6 +13,9 @@ from app.services.cost_sheet_service import cost_sheet_service
 
 
 class ExportService:
+    @staticmethod
+    def _html_text(value: Any) -> str:
+        return escape(str(value if value is not None else ""), quote=True)
 
     def generate_csv_export(
         self, version_id: uuid.UUID, user_id: uuid.UUID, db: Session
@@ -38,6 +42,7 @@ class ExportService:
         writer.writerow(["Version Number", f"v{version.version_number}"])
         writer.writerow(["Change Note", version.change_note or "N/A"])
         writer.writerow(["Basis", sheet.basis])
+        writer.writerow(["Currency", snap.get("currency_code", "LKR")])
         writer.writerow([])
 
         # Production Totals Summary
@@ -119,6 +124,7 @@ class ExportService:
 
         sheet = cost_sheet_service.verify_sheet_access(version.sheet_id, user_id, "viewer", db)
         snap = version.totals_snapshot
+        currency_code = snap.get("currency_code", "LKR")
 
         buckets_html = ""
         for b in snap.get("bucket_breakdown", []):
@@ -126,16 +132,16 @@ class ExportService:
             for item in b.get("items", []):
                 items_html += f"""
                 <tr>
-                    <td>{item.get('name')}</td>
-                    <td>{item.get('quantity')} {item.get('unit') or ''}</td>
-                    <td>{item.get('unit_price')}</td>
-                    <td><strong>{item.get('amount')}</strong></td>
+                    <td>{self._html_text(item.get('name'))}</td>
+                    <td>{self._html_text(item.get('quantity'))} {self._html_text(item.get('unit') or '')}</td>
+                    <td>{self._html_text(item.get('unit_price'))}</td>
+                    <td><strong>{self._html_text(item.get('amount'))}</strong></td>
                 </tr>
                 """
 
             buckets_html += f"""
             <div class="bucket-section">
-                <h3>{b.get('label')} ({b.get('type').capitalize()}) - Total: {b.get('effective_total')}</h3>
+                <h3>{self._html_text(b.get('label'))} ({self._html_text(str(b.get('type', '')).capitalize())}) - Total: {self._html_text(currency_code)} {self._html_text(b.get('effective_total'))}</h3>
                 <table>
                     <thead>
                         <tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr>
@@ -151,7 +157,7 @@ class ExportService:
         <!DOCTYPE html>
         <html>
         <head>
-            <title>{sheet.name} - Version {version.version_number}</title>
+            <title>{self._html_text(sheet.name)} - Version {version.version_number}</title>
             <style>
                 body {{ font-family: Arial, sans-serif; margin: 40px; color: #333; }}
                 h1 {{ margin-bottom: 5px; }}
@@ -167,18 +173,18 @@ class ExportService:
             </style>
         </head>
         <body>
-            <h1>{sheet.name}</h1>
-            <div class="meta">Version {version.version_number} | Basis: {sheet.basis} | Note: {version.change_note or 'N/A'}</div>
+            <h1>{self._html_text(sheet.name)}</h1>
+            <div class="meta">Version {version.version_number} | Basis: {self._html_text(sheet.basis)} | Note: {self._html_text(version.change_note or 'N/A')}</div>
             
             <div class="summary-card">
                 <h2>Production & Pricing Summary</h2>
                 <div class="summary-grid">
-                    <div class="summary-item"><label>Units Produced</label><value>{version.units_produced}</value></div>
-                    <div class="summary-item"><label>Good Units</label><value>{snap.get('good_units', 0)}</value></div>
-                    <div class="summary-item"><label>Total Batch Cost</label><value>{snap.get('total_cost')}</value></div>
-                    <div class="summary-item"><label>Unit Cost</label><value>{snap.get('unit_cost')}</value></div>
-                    <div class="summary-item"><label>Suggested Selling Price</label><value>{snap.get('suggested_price')}</value></div>
-                    <div class="summary-item"><label>Profit / Unit</label><value>{snap.get('profit_per_unit')}</value></div>
+                    <div class="summary-item"><label>Units Produced</label><value>{self._html_text(version.units_produced)}</value></div>
+                    <div class="summary-item"><label>Good Units</label><value>{self._html_text(snap.get('good_units', 0))}</value></div>
+                    <div class="summary-item"><label>Total Batch Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('total_cost'))}</value></div>
+                    <div class="summary-item"><label>Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('unit_cost'))}</value></div>
+                    <div class="summary-item"><label>Suggested Selling Price</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('suggested_price'))}</value></div>
+                    <div class="summary-item"><label>Profit / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('profit_per_unit'))}</value></div>
                 </div>
             </div>
 

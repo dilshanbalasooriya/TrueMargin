@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, status
 from sqlmodel import Session
 
 from app.api.v1.dependencies import get_db, get_current_user_id
@@ -8,6 +8,7 @@ from app.schemas.auth import (
     UserLoginRequest,
     AuthTokenResponse,
     UserProfileResponse,
+    UserSyncRequest,
 )
 from app.services.auth_service import auth_service
 
@@ -58,6 +59,13 @@ def get_current_profile(
 def sync_user_profile(
     user_id: uuid.UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
-    email: str = "user@example.com" # Ideally fetched from JWT, but mocked here for simplicity or we can decode from JWT
+    email: str = "user@example.com",  # Ideally fetched from JWT claims.
+    payload: UserSyncRequest | None = Body(default=None),
 ) -> UserProfileResponse:
-    return auth_service.sync_user(user_id, email, db)
+    return auth_service.sync_user(
+        user_id,
+        email,
+        db,
+        display_name=payload.display_name if payload else None,
+        currency=payload.currency if payload else None,
+    )

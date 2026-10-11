@@ -93,7 +93,6 @@ def _process_bucket(
     declared_total = bucket.declared_total
     
     output_items: List[LineItemOutput] = []
-    items_sum_amount = Decimal("0.0")
     items_sum_cost_per_unit = Decimal("0.0")
 
     # Evaluate line items if Level 2 or 3
@@ -103,7 +102,6 @@ def _process_bucket(
         item_units = item.units_covered if (item.units_covered and item.units_covered > 0) else bucket_units
         item_cost_per_unit = item_amount / item_units
 
-        items_sum_amount += item_amount
         items_sum_cost_per_unit += item_cost_per_unit
 
         output_items.append(
@@ -127,10 +125,13 @@ def _process_bucket(
         effective_total = declared_total
         cost_per_unit = declared_total / bucket_units
     else:
-        if items_sum_amount < declared_total:
+        declared_cost_per_unit = declared_total / bucket_units
+        if items_sum_cost_per_unit < declared_cost_per_unit:
             # Difference creates an unallocated line item
             status = "unallocated_added"
-            unallocated_amount = declared_total - items_sum_amount
+            unallocated_amount = (
+                declared_cost_per_unit - items_sum_cost_per_unit
+            ) * bucket_units
             unallocated_cpu = unallocated_amount / bucket_units
 
             output_items.append(
@@ -150,9 +151,9 @@ def _process_bucket(
             effective_total = declared_total
             cost_per_unit = declared_total / bucket_units
 
-        elif items_sum_amount > declared_total:
+        elif items_sum_cost_per_unit > declared_cost_per_unit:
             status = "exceeded"
-            effective_total = items_sum_amount
+            effective_total = items_sum_cost_per_unit * bucket_units
             cost_per_unit = items_sum_cost_per_unit
         else:
             status = "matched"

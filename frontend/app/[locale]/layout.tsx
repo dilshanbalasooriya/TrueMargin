@@ -1,10 +1,10 @@
-import type { Metadata } from "next";
 import { Inter, Noto_Sans_Sinhala } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/routing';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { ThemeProvider } from '@/components/app/ThemeProvider';
 import "../globals.css";
 
 const inter = Inter({
@@ -38,7 +38,7 @@ export default async function LocaleLayout({
   params: Promise<{locale: string}>;
 }) {
   const { locale } = await params;
-  if (!routing.locales.includes(locale as any)) {
+  if (!routing.locales.some((supportedLocale) => supportedLocale === locale)) {
     notFound();
   }
  
@@ -50,13 +50,15 @@ export default async function LocaleLayout({
   const user = session?.user ?? null;
 
   return (
-    <html lang={locale} className={`${inter.variable} ${notoSansSinhala.variable} h-full antialiased`}>
+    <html lang={locale} suppressHydrationWarning className={`${inter.variable} ${notoSansSinhala.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col font-sans">
-        <NextIntlClientProvider messages={messages}>
-          <AuthProvider initialUser={user} initialSession={session}>
-            {children}
-          </AuthProvider>
-        </NextIntlClientProvider>
+        <ThemeProvider>
+          <NextIntlClientProvider messages={messages}>
+            <AuthProvider initialUser={user} initialSession={session}>
+              {children}
+            </AuthProvider>
+          </NextIntlClientProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

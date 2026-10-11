@@ -12,6 +12,7 @@ class CostSheetCreateRequest(BaseModel):
     kind: str = Field(default="product", description="'product' or 'service'")
     unit_label: str = Field(default="unit", example="unit, kg, hour, job")
     basis: str = Field(default="batch", description="'batch' or 'period'")
+    currency_code: str = Field(default="LKR", min_length=3, max_length=3)
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
     calculation_data: CalculationRequest
@@ -19,6 +20,7 @@ class CostSheetCreateRequest(BaseModel):
 
 class VersionCreateRequest(BaseModel):
     change_note: Optional[str] = Field(None, example="Updated raw material flour price")
+    currency_code: str = Field(default="LKR", min_length=3, max_length=3)
     calculation_data: CalculationRequest
 
 
@@ -31,6 +33,7 @@ class SheetVersionSummary(BaseModel):
     good_units: Decimal
     total_cost: Decimal
     unit_cost: Decimal
+    currency_code: str = "LKR"
     created_at: datetime
 
 

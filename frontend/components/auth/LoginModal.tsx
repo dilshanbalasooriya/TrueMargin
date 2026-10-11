@@ -1,19 +1,27 @@
 'use client';
 
 import { useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { Mail, Loader2, Lock } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { getCurrencyLabel, getSupportedCurrencies } from '@/lib/currencies';
 
 export function LoginModal({ children }: { children: React.ReactNode }) {
+  const t = useTranslations('Auth');
+  const locale = useLocale();
+  const currencies = getSupportedCurrencies();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [currency, setCurrency] = useState('LKR');
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState(false);
   
   const supabase = createClient();
 
@@ -21,33 +29,45 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setConfirmation(false);
     
-    if (isSignUp) {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-      if (error) setError(error.message);
-      else window.location.reload(); // Refresh to catch new session
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) setError(error.message);
-      else window.location.reload(); // Refresh to catch new session
+    try {
+      if (isSignUp) {
+        const { data, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { display_name: displayName, currency } },
+        });
+        if (authError) setError(t('authError'));
+        else if (!data.session) setConfirmation(true);
+        else window.location.reload();
+      } else {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (authError) setError(t('authError'));
+        else window.location.reload();
+      }
+    } catch {
+      setError(t('authError'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleGoogleLogin = async () => {
     setLoading(true);
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+    if (authError) {
+      setError(t('authError'));
+      setLoading(false);
+    }
   };
 
   return (
@@ -56,12 +76,10 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold tracking-tight">
-            {isSignUp ? 'Create an account' : 'Sign in to save'}
+            {isSignUp ? t('createAccount') : t('signInToSave')}
           </DialogTitle>
           <DialogDescription>
-            {isSignUp 
-              ? 'Create a new account to save your costings securely.'
-              : 'Sign in to save your cost calculations and access them anywhere.'}
+            {isSignUp ? t('createDescription') : t('signInDescription')}
           </DialogDescription>
         </DialogHeader>
         
@@ -80,7 +98,7 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
               <path d="M1 1h22v22H1z" fill="none" />
             </svg>
-            Continue with Google
+            {t('continueGoogle')}
           </Button>
 
           <div className="relative">
@@ -89,45 +107,84 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
             </div>
             <div className="relative flex justify-center text-xs uppercase">
               <span className="bg-background px-2 text-muted-foreground">
-                Or continue with email
+                {t('orEmail')}
               </span>
             </div>
           </div>
 
           <form onSubmit={handleEmailAuth} className="flex flex-col gap-3">
             <div className="space-y-2">
+              {isSignUp && (
+                <>
+                  <label htmlFor="auth-display-name" className="sr-only">{t('displayName')}</label>
+                  <Input
+                    id="auth-display-name"
+                    type="text"
+                    placeholder={t('displayName')}
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    required
+                    minLength={2}
+                    className="min-h-11"
+                  />
+                </>
+              )}
+              <label htmlFor="auth-email" className="sr-only">{t('email')}</label>
               <Input 
+                id="auth-email"
                 type="email" 
-                placeholder="name@example.com" 
+                placeholder={t('email')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="h-12"
+                className="min-h-11"
               />
+              <label htmlFor="auth-password" className="sr-only">{t('password')}</label>
               <Input 
+                id="auth-password"
                 type="password" 
-                placeholder="Password" 
+                placeholder={t('password')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="h-12"
+                className="min-h-11"
               />
+              {isSignUp && (
+                <>
+                  <label htmlFor="auth-currency" className="block pt-1 text-sm font-medium">{t('currency')}</label>
+                  <select
+                    id="auth-currency"
+                    value={currency}
+                    onChange={(event) => setCurrency(event.target.value)}
+                    className="min-h-11 w-full rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {currencies.map((code) => (
+                      <option key={code} value={code}>{getCurrencyLabel(code, locale)}</option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
             {error && <div className="text-destructive text-sm font-medium">{error}</div>}
+            {confirmation && <div role="status" className="text-sm text-muted-foreground">{t('emailConfirmation')}</div>}
             
-            <Button type="submit" className="h-12 font-medium" disabled={loading || !email || !password}>
-              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (isSignUp ? "Sign Up" : "Sign In")}
+            <Button type="submit" className="min-h-11 font-medium" disabled={loading || !email || !password || (isSignUp && !displayName.trim())}>
+              {loading ? <Loader2 className="size-5 animate-spin" /> : (isSignUp ? t('signUp') : t('signIn'))}
             </Button>
           </form>
           
           <div className="text-center text-sm text-muted-foreground mt-2">
-            {isSignUp ? "Already have an account? " : "Don't have an account? "}
+            {isSignUp ? `${t('alreadyAccount')} ` : `${t('noAccount')} `}
             <button 
               type="button" 
-              onClick={() => setIsSignUp(!isSignUp)}
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setError(null);
+                setConfirmation(false);
+              }}
               className="text-primary hover:underline font-medium"
             >
-              {isSignUp ? 'Sign In' : 'Sign Up'}
+              {isSignUp ? t('signIn') : t('signUp')}
             </button>
           </div>
         </div>

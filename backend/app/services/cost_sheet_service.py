@@ -86,6 +86,7 @@ class CostSheetService:
             version_number=1,
             user_id=user_id,
             change_note="Initial version created",
+            currency_code=payload.currency_code.upper(),
             calc_result=calc_result,
             db=db,
         )
@@ -221,6 +222,7 @@ class CostSheetService:
             version_number=new_v_num,
             user_id=user_id,
             change_note=payload.change_note or f"Version {new_v_num}",
+            currency_code=payload.currency_code.upper(),
             calc_result=calc_result,
             db=db,
         )
@@ -257,6 +259,7 @@ class CostSheetService:
                     good_units=Decimal(str(snap.get("good_units", 0))),
                     total_cost=Decimal(str(snap.get("total_cost", 0))),
                     unit_cost=Decimal(str(snap.get("unit_cost", 0))),
+                    currency_code=snap.get("currency_code", "LKR"),
                     created_at=v.created_at,
                 )
             )
@@ -293,6 +296,7 @@ class CostSheetService:
             equivalent_markup_or_margin=Decimal(
                 str(snap.get("equivalent_markup_or_margin", 0))
             ),
+            currency_code=snap.get("currency_code", "LKR"),
             created_at=version.created_at,
             bucket_breakdown=snap.get("bucket_breakdown", []),
         )
@@ -429,6 +433,7 @@ class CostSheetService:
 
         req = VersionCreateRequest(
             change_note=f"Restored from Version {target_v.version_number}",
+            currency_code=snap.get("currency_code", "LKR"),
             calculation_data=calc_payload,
         )
         return self.create_new_version(sheet_id, user_id, req, db)
@@ -450,16 +455,19 @@ class CostSheetService:
         version_number: int,
         user_id: uuid.UUID,
         change_note: str,
+        currency_code: str,
         calc_result,
         db: Session,
     ) -> SheetVersion:
+        snapshot = calc_result.model_dump(mode="json")
+        snapshot["currency_code"] = currency_code
         version = SheetVersion(
             sheet_id=sheet_id,
             version_number=version_number,
             change_note=change_note,
             units_produced=calc_result.units_produced,
             defective_units=calc_result.defective_units,
-            totals_snapshot=calc_result.model_dump(mode="json"),
+            totals_snapshot=snapshot,
             created_by=user_id,
         )
         db.add(version)
@@ -512,6 +520,7 @@ class CostSheetService:
                 good_units=Decimal(str(snap.get("good_units", 0))),
                 total_cost=Decimal(str(snap.get("total_cost", 0))),
                 unit_cost=Decimal(str(snap.get("unit_cost", 0))),
+                currency_code=snap.get("currency_code", "LKR"),
                 created_at=current_version.created_at,
             )
 
