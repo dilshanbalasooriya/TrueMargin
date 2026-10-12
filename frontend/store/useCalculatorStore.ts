@@ -6,6 +6,10 @@ export interface LineItemDraft {
   name: string;
   amount: string;
   unitsCovered: string;
+  purchaseQuantity?: string;
+  purchaseUnit?: string;
+  details?: Record<string, string>;
+  isImputed?: boolean;
 }
 
 export interface BucketDraft {
@@ -19,8 +23,10 @@ export interface GuestDraft {
   productName: string;
   kind: 'product' | 'service';
   unitLabel: string;
+  productionBasis: '' | 'batch' | 'monthly';
   unitsProduced: string;
   defectiveUnits: string;
+  defaultUnitsCoveredScope: '' | 'all' | 'overhead_only';
   currencyCode: string;
   currencyOverridden: boolean;
   pricingType: 'markup' | 'margin';
@@ -43,9 +49,11 @@ interface CalculatorState {
 const initialDraft: GuestDraft = {
   productName: '',
   kind: 'product',
-  unitLabel: 'unit',
+  unitLabel: '',
+  productionBasis: '',
   unitsProduced: '',
   defectiveUnits: '',
+  defaultUnitsCoveredScope: '',
   currencyCode: 'LKR',
   currencyOverridden: false,
   pricingType: 'markup',
@@ -79,13 +87,16 @@ function migrateDraft(persistedState: unknown): Partial<CalculatorState> {
     };
   }
 
-  return {
-    draft: {
-      ...initialDraft,
-      ...state.draft,
-      buckets,
-    },
+  const draft = {
+    ...initialDraft,
+    ...state.draft,
+    buckets,
   };
+  if (draft.unitLabel === 'unit') draft.unitLabel = '';
+  if (!state.draft?.productionBasis) draft.productionBasis = '';
+  if (!state.draft?.defaultUnitsCoveredScope) draft.defaultUnitsCoveredScope = '';
+
+  return { draft };
 }
 
 export const useCalculatorStore = create<CalculatorState>()(
@@ -114,7 +125,7 @@ export const useCalculatorStore = create<CalculatorState>()(
     }),
     {
       name: 'truemargin-guest-draft',
-      version: 1,
+      version: 3,
       skipHydration: true,
       migrate: migrateDraft,
       onRehydrateStorage: () => (state) => state?.setHydrated(true),

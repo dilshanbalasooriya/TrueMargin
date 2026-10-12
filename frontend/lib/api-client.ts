@@ -16,11 +16,21 @@ export class ApiError extends Error {
 }
 
 export interface CalculationResult {
+  unit_label: string;
   units_produced: string;
   defective_units: string;
   good_units: string;
+  default_units_covered_scope: 'all' | 'overhead_only';
   total_cost: string;
   unit_cost: string;
+  cash_total_cost: string;
+  economic_total_cost: string;
+  cash_unit_cost: string;
+  economic_unit_cost: string;
+  cost_view: 'cash' | 'economic';
+  break_even_units: string | null;
+  break_even_ready: boolean;
+  is_loss_making: boolean;
   pricing_type: 'markup' | 'margin';
   pricing_percentage: string;
   suggested_price: string;
@@ -34,6 +44,8 @@ export interface CalculationResult {
     hidden: boolean;
     declared_total: string;
     effective_total: string;
+    itemized_total: string;
+    economic_itemized_total: string;
     units_covered: string;
     cost_per_unit: string;
     percentage_of_total: string;
@@ -44,11 +56,17 @@ export interface CalculationResult {
       | 'exceeded';
     items: Array<{
       name: string;
+      quantity: string;
+      unit?: string;
+      unit_price: string;
       amount: string;
+      fixed_amount: string;
+      variable_amount: string;
       units_covered: string;
       cost_per_unit: string;
       kind: string;
       pinned: boolean;
+      is_imputed: boolean;
     }>;
   }>;
 }
@@ -95,36 +113,84 @@ export interface SavedVersion {
 
 export function buildCalculationRequest(draft: GuestDraft, locale = 'en') {
   const buckets = Object.entries(draft.buckets)
-    .filter(([, bucket]) =>
-      bucket.isNone
-      || bucket.totalSpent.trim() !== ''
-      || bucket.items.some((item) => item.name.trim() && item.amount.trim()),
-    )
+    .filter(([, bucket]) => !bucket.isNone && (
+      bucket.totalSpent.trim() !== ''
+      || bucket.items.some((item) =>
+        item.name.trim()
+        && (
+          item.amount.trim()
+          || ['units', 'periods'].includes(item.details?.depreciation_method ?? '')
+        ),
+      )
+    ))
     .map(([key, bucket]) => ({
       type: key,
       label: bucketLabel(key),
-      declared_total: bucket.isNone ? '0' : normalizeDecimalInput(bucket.totalSpent, locale),
+      declared_total: bucket.totalSpent.trim()
+        ? normalizeDecimalInput(bucket.totalSpent, locale)
+        : '0',
       units_covered: bucket.unitsCovered.trim()
         ? normalizeDecimalInput(bucket.unitsCovered, locale)
         : undefined,
-      level: bucket.items.length > 0 ? 2 : 1,
+      level: bucket.items.length === 0
+        ? 1
+        : bucket.items.some((item) =>
+          item.isImputed || Object.values(item.details ?? {}).some((value) => value.trim()),
+        )
+          ? 3
+          : 2,
       hidden: false,
       items: bucket.items
-        .filter((item) => item.name.trim() !== '' && item.amount.trim() !== '')
+        .filter((item) =>
+          item.name.trim() !== ''
+          && (
+            item.amount.trim() !== ''
+            || ['units', 'periods'].includes(item.details?.depreciation_method ?? '')
+          ),
+        )
         .map((item) => ({
           name: item.name.trim(),
-          amount: normalizeDecimalInput(item.amount, locale),
+          quantity: item.purchaseQuantity?.trim()
+            ? normalizeDecimalInput(item.purchaseQuantity, locale)
+            : '1',
+          ...(item.purchaseUnit?.trim() ? { unit: item.purchaseUnit.trim() } : {}),
+          ...(item.amount.trim()
+            ? { amount: normalizeDecimalInput(item.amount, locale) }
+            : {}),
           units_covered: item.unitsCovered.trim()
             ? normalizeDecimalInput(item.unitsCovered, locale)
             : undefined,
+          is_imputed: item.isImputed ?? false,
+          details: Object.fromEntries(
+            Object.entries(item.details ?? {})
+              .filter(([detailKey, value]) =>
+                value.trim() !== ''
+                && !(
+                  detailKey === 'amortization_units'
+                  && item.details?.amortization_method === 'none'
+                ),
+              )
+              .map(([detailKey, value]) => [
+                detailKey,
+                detailKey.endsWith('_percentage')
+                  || detailKey.endsWith('_amount')
+                  || detailKey.endsWith('_units')
+                  || detailKey.endsWith('_price')
+                  || detailKey.endsWith('_measure')
+                  ? normalizeDecimalInput(value, locale)
+                  : value,
+              ]),
+          ),
         })),
     }));
 
   return {
+    unit_label: draft.unitLabel.trim(),
     units_produced: normalizeDecimalInput(draft.unitsProduced, locale),
     defective_units: draft.defectiveUnits.trim()
       ? normalizeDecimalInput(draft.defectiveUnits, locale)
       : '0',
+    default_units_covered_scope: draft.defaultUnitsCoveredScope,
     pricing_type: draft.pricingType,
     pricing_percentage: draft.pricingPercentage.trim()
       ? normalizeDecimalInput(draft.pricingPercentage, locale)
@@ -155,6 +221,16 @@ async function fetchApi<T>(
     headers.set('Content-Type', 'application/json');
   }
 
+  const send = (token?: string) => {
+    const requestHeaders = new Headers(headers);
+    if (token) requestHeaders.set('Authorization', `Bearer ${token}`);
+    return fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers: requestHeaders,
+    });
+  };
+
+  let response: Response;
   if (authenticated) {
     const supabase = createClient();
     const {
@@ -164,13 +240,18 @@ async function fetchApi<T>(
     if (!session?.access_token) {
       throw new ApiError('Authentication required', 401);
     }
-    headers.set('Authorization', `Bearer ${session.access_token}`);
+    response = await send(session.access_token);
+    if (response.status === 401) {
+      const {
+        data: { session: refreshedSession },
+      } = await supabase.auth.refreshSession();
+      if (refreshedSession?.access_token) {
+        response = await send(refreshedSession.access_token);
+      }
+    }
+  } else {
+    response = await send();
   }
-
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-  });
 
   if (!response.ok) {
     const responseBody = (await response.json().catch(() => null)) as
@@ -250,8 +331,8 @@ export async function saveCostSheet(
       body: JSON.stringify({
         name: draft.productName.trim(),
         kind: draft.kind,
-        unit_label: draft.unitLabel.trim() || 'unit',
-        basis: 'batch',
+        unit_label: draft.unitLabel.trim(),
+        basis: draft.productionBasis,
         currency_code: draft.currencyCode,
         calculation_data: calculationData,
       }),
@@ -281,12 +362,28 @@ export function downloadVersionReport(
       throw new ApiError('Authentication required', 401);
     }
 
-    const response = await fetch(
-      `${API_BASE}/cost-sheets/versions/${versionId}/export/${format}`,
-      { headers: { Authorization: `Bearer ${session.access_token}` } },
-    );
+    const endpoint = `${API_BASE}/cost-sheets/versions/${versionId}/export/${format}`;
+    let response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (response.status === 401) {
+      const {
+        data: { session: refreshedSession },
+      } = await supabase.auth.refreshSession();
+      if (refreshedSession?.access_token) {
+        response = await fetch(endpoint, {
+          headers: { Authorization: `Bearer ${refreshedSession.access_token}` },
+        });
+      }
+    }
     if (!response.ok) {
-      throw new ApiError(response.statusText, response.status);
+      const responseBody = (await response.json().catch(() => null)) as
+        | { detail?: string; message?: string }
+        | null;
+      throw new ApiError(
+        responseBody?.detail || responseBody?.message || response.statusText,
+        response.status,
+      );
     }
     return response.blob();
   })();

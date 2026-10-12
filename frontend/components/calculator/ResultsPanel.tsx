@@ -97,19 +97,42 @@ function ResultDetails({
         </p>
       )}
 
+      {result.is_loss_making && (
+        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+          {t('lossWarning')}
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2 rounded-xl bg-primary p-4 text-primary-foreground">
           <p className="text-sm text-primary-foreground/80">{t('unitCost')}</p>
           <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
             {formatCurrency(result.unit_cost, currencyCode, locale)}
           </p>
-          <p className="mt-1 text-xs text-primary-foreground/80">/ {result.good_units} {t('goodUnits').toLowerCase()}</p>
+          <p className="mt-1 text-xs text-primary-foreground/80">/ {result.unit_label}</p>
         </div>
+        <Metric label={t('cashUnitCost')} value={formatCurrency(result.cash_unit_cost, currencyCode, locale)} />
+        <Metric label={t('economicUnitCost')} value={formatCurrency(result.economic_unit_cost, currencyCode, locale)} />
         <Metric label={t('suggestedPrice')} value={formatCurrency(result.suggested_price, currencyCode, locale)} />
         <Metric label={t('profitPerUnit')} value={formatCurrency(result.profit_per_unit, currencyCode, locale)} />
         <Metric label={t('totalProfit')} value={formatCurrency(result.total_expected_profit, currencyCode, locale)} />
         <Metric label={t(equivalentKey)} value={`${result.equivalent_markup_or_margin}%`} />
+        {!partial && result.break_even_ready && (
+          <Metric
+            label={t('breakEvenUnits')}
+            value={result.break_even_units === null ? t('breakEvenUnavailable') : `${result.break_even_units} ${result.unit_label}`}
+          />
+        )}
       </div>
+
+      {!partial
+        && !result.break_even_ready
+        && result.bucket_breakdown.some((bucket) => Number(bucket.effective_total) > 0)
+        && (
+          <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            {t('breakEvenNeedsLevel3')}
+          </p>
+        )}
 
       <div>
         <h3 className="mb-3 text-sm font-semibold">{t('costBreakdown')}</h3>
@@ -122,6 +145,28 @@ function ResultDetails({
                   {formatCurrency(bucket.cost_per_unit, currencyCode, locale)}
                 </span>
               </div>
+              {bucket.reconciliation_status === 'unallocated_added' && (
+                <p className="mb-2 text-xs leading-5 text-muted-foreground">
+                  {t('reconciliation.unallocated', {
+                    amount: formatCurrency(
+                      String(Math.max(
+                        0,
+                        Number(bucket.effective_total)
+                          - Number(result.cost_view === 'cash'
+                            ? bucket.itemized_total
+                            : bucket.economic_itemized_total),
+                      )),
+                      currencyCode,
+                      locale,
+                    ),
+                  })}
+                </p>
+              )}
+              {bucket.reconciliation_status === 'exceeded' && (
+                <p className="mb-2 text-xs leading-5 text-muted-foreground">
+                  {t('reconciliation.exceeded')}
+                </p>
+              )}
               <div
                 className="h-1.5 overflow-hidden rounded-full bg-muted"
                 role="img"
@@ -134,9 +179,6 @@ function ResultDetails({
         </ul>
       </div>
 
-      <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
-        {t('breakEvenDeferred')}
-      </p>
     </div>
   );
 }

@@ -30,9 +30,10 @@ export function CostSheetSetup({ draft, onChange }: CostSheetSetupProps) {
 
       <div className="grid gap-4 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 sm:p-5">
         <div className="space-y-2 sm:col-span-2">
-          <label htmlFor="cost-sheet-name" className="text-sm font-medium">{t('name')}</label>
+          <label htmlFor="cost-sheet-name" className="text-sm font-medium">{t('name')} <span className="text-destructive">*</span></label>
           <Input
             id="cost-sheet-name"
+            required
             value={draft.productName}
             onChange={(event) => onChange({ productName: event.target.value })}
             placeholder={t('namePlaceholder')}
@@ -55,21 +56,40 @@ export function CostSheetSetup({ draft, onChange }: CostSheetSetupProps) {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="unit-label" className="text-sm font-medium">{t('unitLabel')}</label>
+          <label htmlFor="unit-label" className="text-sm font-medium">{t('unitLabel')} <span className="text-destructive">*</span></label>
           <Input
             id="unit-label"
+            required
             value={draft.unitLabel}
             onChange={(event) => onChange({ unitLabel: event.target.value })}
             placeholder={t('unitPlaceholder')}
             autoComplete="off"
             className="min-h-11"
+            aria-describedby="unit-label-help"
           />
+          <p id="unit-label-help" className="text-xs leading-5 text-muted-foreground">{t('unitLabelHint')}</p>
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="units-produced" className="text-sm font-medium">{t('unitsProduced')}</label>
+          <label htmlFor="production-basis" className="text-sm font-medium">{t('productionBasis')} <span className="text-destructive">*</span></label>
+          <select
+            id="production-basis"
+            required
+            value={draft.productionBasis}
+            onChange={(event) => onChange({ productionBasis: event.target.value as GuestDraft['productionBasis'] })}
+            className="min-h-11 w-full rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="" disabled>{t('chooseBasis')}</option>
+            <option value="monthly">{t('monthly')}</option>
+            <option value="batch">{t('batch')}</option>
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="units-produced" className="text-sm font-medium">{t('unitsProduced')} <span className="text-destructive">*</span></label>
           <Input
             id="units-produced"
+            required
             type="text"
             inputMode="decimal"
             autoComplete="off"
@@ -82,21 +102,37 @@ export function CostSheetSetup({ draft, onChange }: CostSheetSetupProps) {
           <p id="units-help" className="text-xs text-muted-foreground">{t('unitsProducedHint')}</p>
         </div>
 
-        <div className="space-y-2">
-          <label htmlFor="defective-units" className="flex items-center gap-2 text-sm font-medium">
-            {t('defects')} <span className="font-normal text-muted-foreground">({t('optional')})</span>
-          </label>
-          <Input
-            id="defective-units"
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-            value={draft.defectiveUnits}
-            onChange={(event) => onChange({ defectiveUnits: event.target.value })}
-            placeholder="0"
-            className="min-h-11"
-          />
-        </div>
+        <fieldset className="space-y-2 sm:col-span-2">
+          <legend className="text-sm font-medium">{t('coverageScope')} <span className="text-destructive">*</span></legend>
+          <p className="text-xs leading-5 text-muted-foreground">{t('coverageScopeHint')}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(['all', 'overhead_only'] as const).map((scope) => (
+              <label
+                key={scope}
+                className={`flex cursor-pointer gap-3 rounded-lg border p-3 transition-colors ${
+                  draft.defaultUnitsCoveredScope === scope
+                    ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                    : 'border-border hover:bg-muted/50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="coverage-scope"
+                  value={scope}
+                  checked={draft.defaultUnitsCoveredScope === scope}
+                  onChange={() => onChange({ defaultUnitsCoveredScope: scope })}
+                  className="mt-1 accent-primary"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{t(`coverageScopeOptions.${scope}.title`)}</span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    {t(`coverageScopeOptions.${scope}.description`)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <div className="space-y-2 sm:col-span-2">
           <label htmlFor="currency-code" className="text-sm font-medium">{t('currency')}</label>
