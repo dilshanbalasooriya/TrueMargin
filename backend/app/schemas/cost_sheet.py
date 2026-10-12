@@ -1,21 +1,32 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any, Literal
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.calculation import CalculationRequest, BucketBreakdownOutput
 
 
 class CostSheetCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, example="Standard Aluminium Window Frame")
-    kind: str = Field(default="product", description="'product' or 'service'")
-    unit_label: str = Field(default="unit", example="unit, kg, hour, job")
-    basis: str = Field(default="batch", description="'batch' or 'period'")
+    kind: Literal["product", "service"] = "product"
+    unit_label: str = Field(..., min_length=1, example="piece, kg, hour, job")
+    basis: Literal["batch", "monthly"] = Field(
+        ...,
+        description="Whether units_produced describes one batch or one month.",
+    )
     currency_code: str = Field(default="LKR", min_length=3, max_length=3)
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
     calculation_data: CalculationRequest
+
+    @field_validator("unit_label")
+    @classmethod
+    def validate_unit_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("unit_label must not be blank.")
+        return value
 
 
 class VersionCreateRequest(BaseModel):
@@ -53,12 +64,22 @@ class CostSheetResponse(BaseModel):
 
 class SheetVersionDetailResponse(SheetVersionSummary):
     sheet_id: uuid.UUID
+    unit_label: str
     pricing_type: str
     pricing_percentage: Decimal
+    target_selling_price: Optional[Decimal] = None
+    cash_total_cost: Decimal = Decimal("0")
+    economic_total_cost: Decimal = Decimal("0")
+    cash_unit_cost: Decimal = Decimal("0")
+    economic_unit_cost: Decimal = Decimal("0")
+    cost_view: Literal["cash", "economic"] = "economic"
+    default_units_covered_scope: Literal["all", "overhead_only"] = "all"
     suggested_price: Decimal
     profit_per_unit: Decimal
     total_expected_profit: Decimal
     equivalent_markup_or_margin: Decimal
+    break_even_units: Optional[Decimal] = None
+    is_loss_making: bool = False
     bucket_breakdown: List[BucketBreakdownOutput]
 
 

@@ -1,6 +1,6 @@
 import uuid
 from typing import List
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel import Session
 
 from app.api.v1.dependencies import get_db, get_current_user_id, WorkspaceAccess
@@ -31,7 +31,10 @@ def create_cost_sheet(
     workspace: Workspace = Depends(WorkspaceAccess(required_role="editor")),
     db: Session = Depends(get_db),
 ) -> CostSheetResponse:
-    return cost_sheet_service.create_cost_sheet(workspace_id, user_id, payload, db)
+    try:
+        return cost_sheet_service.create_cost_sheet(workspace_id, user_id, payload, db)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
 
 
 @router.get(
@@ -74,7 +77,10 @@ def create_new_version(
     user_id: uuid.UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> SheetVersionDetailResponse:
-    return cost_sheet_service.create_new_version(sheet_id, user_id, payload, db)
+    try:
+        return cost_sheet_service.create_new_version(sheet_id, user_id, payload, db)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
 
 
 @router.get(

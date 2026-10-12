@@ -1,9 +1,10 @@
 import uuid
+import logging
 from typing import Generator
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
-from jwt import PyJWKClient, PyJWTError
+from jwt import PyJWKClient, PyJWKClientConnectionError, PyJWKClientError, PyJWTError
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -15,6 +16,7 @@ security = HTTPBearer()
 # Dynamic JWKS client that automatically fetches & caches Supabase public signing keys
 JWKS_URL = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
 jwks_client = PyJWKClient(JWKS_URL)
+logger = logging.getLogger(__name__)
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -27,48 +29,51 @@ def get_current_user_id(
 ) -> uuid.UUID:
     """
     Decodes Supabase Auth JWT token and extracts the authenticated user's UUID.
-    Supports modern RS256/ES256 asymmetric JWKS keys with fallback to legacy HS256 secret.
+    Supports modern RS256/ES256 JWKS keys and legacy HS256 secret-based tokens.
     """
     token = credentials.credentials
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate authentication credentials.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        # 1. Attempt dynamic verification via Supabase public JWKS key set
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        algorithm = jwt.get_unverified_header(token).get("alg")
+    except PyJWTError as error:
+        logger.warning("Rejected Supabase JWT with an invalid header.")
+        raise unauthorized from error
+
+    if algorithm == "HS256":
+        signing_key = settings.SUPABASE_JWT_SECRET
+    elif algorithm in {"RS256", "ES256"}:
+        try:
+            signing_key = jwks_client.get_signing_key_from_jwt(token).key
+        except PyJWKClientConnectionError as error:
+            logger.error("Could not reach Supabase JWKS endpoint.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication signing keys are temporarily unavailable.",
+            ) from error
+        except PyJWKClientError as error:
+            logger.warning("Supabase JWKS lookup failed (%s).", type(error).__name__)
+            raise unauthorized from error
+    else:
+        raise unauthorized
+
+    try:
         payload = jwt.decode(
             token,
-            signing_key.key,
-            algorithms=["RS256", "ES256", "HS256"],
+            signing_key,
+            algorithms=[algorithm],
             options={"verify_aud": False},
         )
-        user_id_str: str = payload.get("sub")
+        user_id_str = payload.get("sub")
         if not user_id_str:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload: missing sub claim.",
-            )
+            raise unauthorized
         return uuid.UUID(user_id_str)
-
-    except (PyJWTError, Exception):
-        # 2. Fallback check for legacy static HS256 secret
-        try:
-            payload = jwt.decode(
-                token,
-                settings.SUPABASE_JWT_SECRET,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
-            )
-            user_id_str = payload.get("sub")
-            if not user_id_str:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token payload: missing sub claim.",
-                )
-            return uuid.UUID(user_id_str)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate authentication credentials.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    except (PyJWTError, ValueError, TypeError) as error:
+        logger.warning("Supabase JWT verification failed (%s).", type(error).__name__)
+        raise unauthorized from error
 
 
 class WorkspaceAccess:

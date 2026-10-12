@@ -67,7 +67,10 @@ class CostSheetService:
         payload: CostSheetCreateRequest,
         db: Session,
     ) -> CostSheetResponse:
-        calc_result = calculate_cost_sheet(payload.calculation_data)
+        calculation_data = payload.calculation_data.model_copy(
+            update={"unit_label": payload.unit_label}
+        )
+        calc_result = calculate_cost_sheet(calculation_data)
 
         sheet = CostSheet(
             workspace_id=workspace_id,
@@ -215,7 +218,10 @@ class CostSheetService:
         latest_v_num = db.exec(stmt).first() or 0
         new_v_num = latest_v_num + 1
 
-        calc_result = calculate_cost_sheet(payload.calculation_data)
+        calculation_data = payload.calculation_data.model_copy(
+            update={"unit_label": sheet.unit_label or "unit"}
+        )
+        calc_result = calculate_cost_sheet(calculation_data)
 
         version = self._persist_version(
             sheet_id=sheet.id,
@@ -275,12 +281,13 @@ class CostSheetService:
                 detail="Version record not found.",
             )
 
-        self.verify_sheet_access(version.sheet_id, user_id, "viewer", db)
+        sheet = self.verify_sheet_access(version.sheet_id, user_id, "viewer", db)
 
         snap = version.totals_snapshot
         return SheetVersionDetailResponse(
             id=version.id,
             sheet_id=version.sheet_id,
+            unit_label=sheet.unit_label or "unit",
             version_number=version.version_number,
             change_note=version.change_note,
             units_produced=version.units_produced,
@@ -288,14 +295,31 @@ class CostSheetService:
             good_units=Decimal(str(snap.get("good_units", 0))),
             total_cost=Decimal(str(snap.get("total_cost", 0))),
             unit_cost=Decimal(str(snap.get("unit_cost", 0))),
+            cash_total_cost=Decimal(str(snap.get("cash_total_cost", snap.get("total_cost", 0)))),
+            economic_total_cost=Decimal(str(snap.get("economic_total_cost", snap.get("total_cost", 0)))),
+            cash_unit_cost=Decimal(str(snap.get("cash_unit_cost", snap.get("unit_cost", 0)))),
+            economic_unit_cost=Decimal(str(snap.get("economic_unit_cost", snap.get("unit_cost", 0)))),
+            cost_view=snap.get("cost_view", "economic"),
+            default_units_covered_scope=snap.get("default_units_covered_scope", "all"),
             pricing_type=snap.get("pricing_type", "markup"),
             pricing_percentage=Decimal(str(snap.get("pricing_percentage", 0))),
+            target_selling_price=(
+                Decimal(str(snap["target_selling_price"]))
+                if snap.get("target_selling_price") is not None
+                else None
+            ),
             suggested_price=Decimal(str(snap.get("suggested_price", 0))),
             profit_per_unit=Decimal(str(snap.get("profit_per_unit", 0))),
             total_expected_profit=Decimal(str(snap.get("total_expected_profit", 0))),
             equivalent_markup_or_margin=Decimal(
                 str(snap.get("equivalent_markup_or_margin", 0))
             ),
+            break_even_units=(
+                Decimal(str(snap["break_even_units"]))
+                if snap.get("break_even_units") is not None
+                else None
+            ),
+            is_loss_making=snap.get("is_loss_making", False),
             currency_code=snap.get("currency_code", "LKR"),
             created_at=version.created_at,
             bucket_breakdown=snap.get("bucket_breakdown", []),
@@ -402,6 +426,8 @@ class CostSheetService:
                         ),
                         kind=item.get("kind", "user"),
                         pinned=item.get("pinned", False),
+                        is_imputed=item.get("is_imputed", False),
+                        cost_behavior=item.get("cost_behavior", "variable"),
                         details=item.get("details", {}),
                     )
                 )
@@ -419,15 +445,26 @@ class CostSheetService:
                     level=b.get("level", 1),
                     method=b.get("method"),
                     hidden=b.get("hidden", False),
+                    cost_behavior=b.get("cost_behavior", "variable"),
                     items=transformed_items,
                 )
             )
 
         calc_payload = CalculationRequest(
+            unit_label=snap.get("unit_label", "unit"),
             units_produced=target_v.units_produced,
             defective_units=target_v.defective_units,
             pricing_type=snap.get("pricing_type", "markup"),
             pricing_percentage=Decimal(str(snap.get("pricing_percentage", 0))),
+            cost_view=snap.get("cost_view", "economic"),
+            default_units_covered_scope=snap.get(
+                "default_units_covered_scope", "all"
+            ),
+            target_selling_price=(
+                Decimal(str(snap["target_selling_price"]))
+                if snap.get("target_selling_price") is not None
+                else None
+            ),
             buckets=transformed_buckets,
         )
 
@@ -499,7 +536,11 @@ class CostSheetService:
                     units_covered=item.units_covered,
                     kind=item.kind,
                     pinned=item.pinned,
-                    details=item.details,
+                    details={
+                        **item.details,
+                        "_is_imputed": item.is_imputed,
+                        "_cost_behavior": item.cost_behavior,
+                    },
                 )
                 db.add(line)
 

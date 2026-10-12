@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from app.schemas.calculation import CalculationRequest, CalculationResponse
 from app.services.calculation_service import calculate_cost_sheet
 
@@ -13,4 +13,7 @@ router = APIRouter(prefix="/calculation", tags=["Stateless Calculation Engine"])
     description="Stateless endpoint for guest or real-time frontend calculations. Runs reconciliation and pricing logic."
 )
 def compute_calculation(payload: CalculationRequest) -> CalculationResponse:
-    return calculate_cost_sheet(payload)
+    try:
+        return calculate_cost_sheet(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
