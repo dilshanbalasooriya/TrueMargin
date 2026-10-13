@@ -1,20 +1,25 @@
-import { Inter, Noto_Sans_Sinhala } from "next/font/google";
+import { Noto_Sans_Sinhala, Plus_Jakarta_Sans } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { routing } from '@/i18n/routing';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import { ThemeProvider } from '@/components/app/ThemeProvider';
+import { AppShell } from '@/components/app/AppShell';
 import "../globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+const plusJakartaSans = Plus_Jakarta_Sans({
+  variable: "--font-plus-jakarta",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
 });
 
 const notoSansSinhala = Noto_Sans_Sinhala({
   variable: "--font-noto-sinhala",
   subsets: ["sinhala"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 
@@ -50,12 +55,17 @@ export default async function LocaleLayout({
   const user = session?.user ?? null;
 
   return (
-    <html lang={locale} suppressHydrationWarning className={`${inter.variable} ${notoSansSinhala.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col font-sans">
+    <html lang={locale} suppressHydrationWarning className={`${plusJakartaSans.variable} ${notoSansSinhala.variable} h-full antialiased`}>
+      <head>
+        <meta name="darkreader-lock" content="" />
+      </head>
+      <body className="min-h-full flex flex-col font-sans" suppressHydrationWarning>
         <ThemeProvider>
           <NextIntlClientProvider messages={messages}>
             <AuthProvider initialUser={user} initialSession={session}>
-              {children}
+              <AppShell>
+                {children}
+              </AppShell>
             </AuthProvider>
           </NextIntlClientProvider>
         </ThemeProvider>

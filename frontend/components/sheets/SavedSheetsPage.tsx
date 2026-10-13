@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AppHeader } from '@/components/app/AppHeader';
 import { LoginModal } from '@/components/auth/LoginModal';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Link } from '@/i18n/routing';
@@ -102,9 +101,7 @@ export function SavedSheetsPage() {
   };
 
   return (
-    <div className="min-h-dvh bg-background">
-      <AppHeader />
-      <main className="mx-auto max-w-5xl px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
+    <main className="mx-auto w-full max-w-5xl px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
         <div className="mb-7">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{t('title')}</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">{t('description')}</p>
@@ -177,6 +174,5 @@ export function SavedSheetsPage() {
           </div>
         )}
       </main>
-    </div>
   );
 }

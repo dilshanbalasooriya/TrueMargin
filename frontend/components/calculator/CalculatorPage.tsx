@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AppHeader } from '@/components/app/AppHeader';
 import { BucketCard } from '@/components/calculator/BucketCard';
 import { CostSheetSetup } from '@/components/calculator/CostSheetSetup';
 import { MobileResultBar } from '@/components/calculator/MobileResultBar';
@@ -14,6 +13,8 @@ import { isValidCurrencyCode } from '@/lib/currencies';
 import { parseDecimalInput } from '@/lib/numbers';
 import { useCalculatorStore } from '@/store/useCalculatorStore';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { toast } from '@/store/useToast';
+import { Lock, PieChart, Zap, Ban } from 'lucide-react';
 import type { CalculationResult } from '@/lib/api-client';
 import type { BucketDraft, GuestDraft } from '@/store/useCalculatorStore';
 
@@ -173,6 +174,8 @@ export function CalculatorPage() {
     hydrated,
     updateDraft,
     updateBucket,
+    setIsDirty,
+    markClean,
   } = useCalculatorStore();
   const { user } = useAuth();
 
@@ -181,9 +184,6 @@ export function CalculatorPage() {
   const [calculationError, setCalculationError] = useState<CalculationError | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState<number | null>(null);
-  const [profileError, setProfileError] = useState<number | null>(null);
-  const [reportError, setReportError] = useState(false);
   const requestSequence = useRef(0);
   const profileUserId = useRef<string | null>(null);
   const resultRef = useRef<CalculationResult | null>(null);
@@ -194,6 +194,16 @@ export function CalculatorPage() {
   );
   const unansweredCount = BUCKETS.length - answeredCount;
   const partial = unansweredCount > 0;
+
+  const isSetupComplete = useMemo(() => {
+    const vol = Number(draft.unitsProduced.trim());
+    return Boolean(
+      draft.productName.trim() &&
+      draft.unitLabel.trim() &&
+      !isNaN(vol) &&
+      vol > 0,
+    );
+  }, [draft.productName, draft.unitLabel, draft.unitsProduced]);
 
   useEffect(() => {
     void useCalculatorStore.persist.rehydrate();
@@ -210,21 +220,16 @@ export function CalculatorPage() {
     void syncUserProfile()
       .then((profile) => {
         const workspace = profile.workspaces[0];
-        if (!workspace) {
-          setProfileError(0);
-          return;
-        }
+        if (!workspace) return;
         updateDraft({
           workspaceId: workspace.id,
           ...(!draft.currencyOverridden && !draft.sheetId
           ? { currencyCode: (workspace.currency || profile.currency).toUpperCase() }
             : {}),
         });
-        setProfileError(null);
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         profileUserId.current = null;
-        setProfileError(error instanceof ApiError ? error.status : 0);
       });
   }, [draft.currencyOverridden, draft.sheetId, hydrated, updateDraft, user]);
 
@@ -277,17 +282,31 @@ export function CalculatorPage() {
 
   const changeDraft = (updates: Partial<GuestDraft>) => {
     updateDraft(updates);
+    setIsDirty(true);
     setSaved(false);
-    setSaveError(null);
     setCalculationError(null);
   };
 
   const changeBucket = (key: string, updates: Partial<BucketDraft>) => {
     updateBucket(key, updates);
+    setIsDirty(true);
     setSaved(false);
-    setSaveError(null);
     setCalculationError(null);
   };
+
+  const orderedBuckets = useMemo(() => {
+    if (draft.kind === 'service') {
+      return [
+        { key: 'labor', titleKey: 'labor', questionKey: 'laborQuestion' },
+        { key: 'material', titleKey: 'materials', questionKey: 'materialsQuestion' },
+        { key: 'transport', titleKey: 'transport', questionKey: 'transportQuestion' },
+        { key: 'overhead', titleKey: 'overhead', questionKey: 'overheadQuestion' },
+        { key: 'machinery', titleKey: 'machinery', questionKey: 'machineryQuestion' },
+        { key: 'custom_fees', titleKey: 'customFees', questionKey: 'customFeesQuestion' },
+      ] as const;
+    }
+    return BUCKETS;
+  }, [draft.kind]);
 
   const answered = BUCKETS.some(({ key }) => bucketIsAnswered(draft.buckets[key]));
   const started = Boolean(draft.unitsProduced.trim() || draft.defectiveUnits.trim() || answered);
@@ -297,9 +316,12 @@ export function CalculatorPage() {
   const visibleLoading = loading && started && answered && draftValid;
 
   const save = async () => {
-    if (!user || !draft.productName.trim() || !visibleResult || !draftValid || visibleLoading) return;
+    if (!user) {
+      toast.error(t('saveNeedsLogin'));
+      return;
+    }
+    if (!draft.productName.trim() || !visibleResult || !draftValid || visibleLoading) return;
     setSaving(true);
-    setSaveError(null);
     try {
       let workspaceId = draft.workspaceId;
       if (!workspaceId) {
@@ -322,18 +344,25 @@ export function CalculatorPage() {
           workspaceId,
         });
       }
+      markClean();
       setSaved(true);
-      setSaveError(null);
+      toast.success(t('saveSuccess'));
     } catch (error: unknown) {
-      setSaveError(error instanceof ApiError ? error.status : 0);
+      if (error instanceof ApiError && error.status === 401) {
+        toast.error(t('saveNeedsLogin'));
+      } else {
+        toast.error(t('saveError'));
+      }
     } finally {
       setSaving(false);
     }
   };
 
   const downloadCsv = async () => {
-    if (!draft.versionId) return;
-    setReportError(false);
+    if (!draft.versionId) {
+      toast.error(t('reportRequiresSave'));
+      return;
+    }
     try {
       const blob = await downloadVersionReport(draft.versionId, 'csv');
       const url = URL.createObjectURL(blob);
@@ -345,16 +374,18 @@ export function CalculatorPage() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch {
-      setReportError(true);
+      toast.error(t('reportError'));
     }
   };
 
   const printReport = async () => {
-    if (!draft.versionId) return;
-    setReportError(false);
+    if (!draft.versionId) {
+      toast.error(t('reportRequiresSave'));
+      return;
+    }
     const reportWindow = window.open('about:blank', '_blank');
     if (!reportWindow) {
-      setReportError(true);
+      toast.error(t('reportError'));
       return;
     }
     try {
@@ -363,7 +394,7 @@ export function CalculatorPage() {
       reportWindow.location.href = url;
     } catch {
       reportWindow.close();
-      setReportError(true);
+      toast.error(t('reportError'));
     }
   };
 
@@ -383,34 +414,104 @@ export function CalculatorPage() {
   };
 
   return (
-    <div className="min-h-dvh bg-background">
-      <AppHeader />
-      <main className="mx-auto w-full max-w-7xl px-4 pb-32 pt-7 sm:px-6 sm:pb-12 sm:pt-10 lg:px-8">
-        <div className="mb-7 max-w-3xl">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">TrueMargin</p>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{pageT('title')}</h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground sm:text-base">{pageT('description')}</p>
-        </div>
+    <>
+      <main className="mx-auto w-full max-w-7xl px-4 pb-32 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:px-8">
+        {/* Simple & Focused Hero Section */}
+        <div className="mb-6 space-y-3">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl sm:leading-9">
+            {pageT('title')}
+          </h1>
 
-        {(profileError !== null || saveError !== null || reportError) && (
-          <div className="mb-5 space-y-2" aria-live="polite">
-            {profileError !== null && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{profileError === 401 ? t('backendAuthError') : profileError === 503 ? t('backendAuthUnavailable') : t('profileError')}</p>}
-            {saveError !== null && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{saveError === 401 ? t('backendAuthError') : saveError === 503 ? t('backendAuthUnavailable') : t('saveError')}</p>}
-            {reportError && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{t('reportError')}</p>}
+          {/* Visual 3-step guide showing the purpose of this application at a glance */}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/80 px-2.5 py-1.5 text-foreground/90 font-medium shadow-2xs">
+              <span className="size-1.5 rounded-full bg-blue-500" />
+              {locale === 'si' ? '1. වියදම් ඇතුළත් කරන්න' : '1. Enter Costs'}
+            </span>
+            <span className="text-muted-foreground/40 hidden sm:inline">→</span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/80 px-2.5 py-1.5 text-foreground/90 font-medium shadow-2xs">
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              {locale === 'si' ? '2. නියම ඒකක පිරිවැය' : '2. Real Unit Cost'}
+            </span>
+            <span className="text-muted-foreground/40 hidden sm:inline">→</span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/80 px-2.5 py-1.5 text-foreground/90 font-medium shadow-2xs">
+              <span className="size-1.5 rounded-full bg-amber-500" />
+              {locale === 'si' ? '3. ලාභය සහිත විකුණුම් මිල' : '3. Profitable Price'}
+            </span>
           </div>
-        )}
+        </div>
 
         <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-8">
           <div className="min-w-0 space-y-8">
             <CostSheetSetup draft={draft} onChange={changeDraft} />
 
-            <section className="space-y-4" aria-labelledby="costs-heading">
-              <div>
-                <h2 id="costs-heading" className="text-lg font-semibold tracking-tight">{t('costsTitle')}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{t('costsDescription')}</p>
+            {!isSetupComplete && (
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  document.getElementById('cost-sheet-name')?.focus();
+                  toast.info(t('costsLockedNotice'));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    document.getElementById('cost-sheet-name')?.focus();
+                  }
+                }}
+                className="max-w-xl sm:max-w-2xl flex items-center gap-3 rounded-xl border border-dashed border-primary/30 bg-primary/5 p-4 text-xs cursor-pointer transition-colors hover:bg-primary/10"
+              >
+                <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Lock className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground">{t('costsLockedTitle')}</p>
+                  <p className="text-muted-foreground">{t('costsLockedNotice')}</p>
+                </div>
+              </div>
+            )}
+
+            <section
+              className={`max-w-xl sm:max-w-2xl space-y-4 transition-all duration-300 ${
+                !isSetupComplete ? 'opacity-40 pointer-events-none select-none filter blur-[0.4px]' : ''
+              }`}
+              aria-labelledby="costs-heading"
+            >
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+                      <PieChart className="size-4" />
+                    </span>
+                    <h2 id="costs-heading" className="text-sm font-bold tracking-tight text-foreground sm:text-base">
+                      {draft.productName.trim()
+                        ? t('costsTitle', { productName: draft.productName.trim() })
+                        : t('costsTitleGeneric')}
+                    </h2>
+                  </div>
+
+                  {/* Category Progress Pill */}
+                  <div className="flex items-center gap-1.5 rounded-full border border-border/80 bg-muted/40 px-2.5 py-0.5 text-xs font-medium text-muted-foreground shadow-2xs">
+                    <span className="size-2 rounded-full bg-emerald-500" />
+                    <span>
+                      {t('categoriesAnswered', { answered: answeredCount, total: BUCKETS.length })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Visual Action Guide pills (Step 1 removed) */}
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 py-1 text-foreground/80 font-medium shadow-2xs">
+                    <Zap className="size-3 text-amber-500" />
+                    {t('costGuideStep2')}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 py-1 text-foreground/80 font-medium shadow-2xs">
+                    <Ban className="size-3 text-muted-foreground" />
+                    {t('costGuideStep3')}
+                  </span>
+                </div>
               </div>
               <div className="space-y-3">
-                {BUCKETS.map(({ key, titleKey, questionKey }) => (
+                {orderedBuckets.map(({ key, titleKey, questionKey }) => (
                   <BucketCard
                     key={key}
                     bucketKey={key}
@@ -437,6 +538,8 @@ export function CalculatorPage() {
                         ? result?.good_units
                         : undefined
                     }
+                    monthlyUnits={draft.unitsProduced}
+                    unitLabel={draft.unitLabel}
                     onChange={(updates) => changeBucket(key, updates)}
                   />
                 ))}
@@ -480,6 +583,6 @@ export function CalculatorPage() {
       </main>
 
       <MobileResultBar {...resultProps} />
-    </div>
+    </>
   );
 }

@@ -44,16 +44,20 @@ interface CalculatorState {
   updateBucket: (key: string, updates: Partial<BucketDraft>) => void;
   setHydrated: (hydrated: boolean) => void;
   resetDraft: () => void;
+  loadDraft: (draft: GuestDraft) => void;
+  isDirty: boolean;
+  setIsDirty: (dirty: boolean) => void;
+  markClean: () => void;
 }
 
 const initialDraft: GuestDraft = {
   productName: '',
   kind: 'product',
   unitLabel: '',
-  productionBasis: '',
+  productionBasis: 'monthly',
   unitsProduced: '',
   defectiveUnits: '',
-  defaultUnitsCoveredScope: '',
+  defaultUnitsCoveredScope: 'all',
   currencyCode: 'LKR',
   currencyOverridden: false,
   pricingType: 'markup',
@@ -121,7 +125,11 @@ export const useCalculatorStore = create<CalculatorState>()(
           },
         })),
       setHydrated: (hydrated) => set({ hydrated }),
-      resetDraft: () => set({ draft: initialDraft }),
+      resetDraft: () => set({ draft: initialDraft, isDirty: false }),
+      loadDraft: (draft) => set({ draft, isDirty: false }),
+      isDirty: false,
+      setIsDirty: (isDirty) => set({ isDirty }),
+      markClean: () => set({ isDirty: false }),
     }),
     {
       name: 'truemargin-guest-draft',

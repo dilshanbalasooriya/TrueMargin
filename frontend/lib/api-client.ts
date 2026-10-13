@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import { normalizeDecimalInput } from '@/lib/numbers';
-import type { GuestDraft } from '@/store/useCalculatorStore';
+import type { BucketDraft, GuestDraft } from '@/store/useCalculatorStore';
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -387,4 +387,95 @@ export function downloadVersionReport(
     }
     return response.blob();
   })();
+}
+
+export interface SheetVersionDetail {
+  id: string;
+  sheet_id: string;
+  version_number: number;
+  unit_cost: string;
+  currency_code: string;
+  created_at: string;
+  unit_label: string;
+  units_produced?: string;
+  defective_units?: string;
+  pricing_type: 'markup' | 'margin';
+  pricing_percentage: string;
+  default_units_covered_scope?: 'all' | 'overhead_only';
+  bucket_breakdown: Array<{
+    type: string;
+    label: string;
+    level: number;
+    hidden: boolean;
+    declared_total: string;
+    effective_total: string;
+    units_covered: string;
+    cost_per_unit: string;
+    items: Array<{
+      name: string;
+      quantity?: string;
+      unit?: string;
+      amount: string;
+      units_covered: string;
+      is_imputed?: boolean;
+    }>;
+  }>;
+}
+
+export function getVersionDetail(versionId: string): Promise<SheetVersionDetail> {
+  return fetchApi<SheetVersionDetail>(
+    `/cost-sheets/versions/${versionId}`,
+    {},
+    true,
+  );
+}
+
+export function deleteCostSheet(sheetId: string, permanent = false): Promise<void> {
+  return fetchApi<void>(
+    `/cost-sheets/${sheetId}?permanent=${permanent}`,
+    { method: 'DELETE' },
+    true,
+  );
+}
+
+export function loadSheetVersionIntoDraft(
+  sheet: CostSheet,
+  detail: SheetVersionDetail,
+): GuestDraft {
+  const buckets: Record<string, BucketDraft> = {};
+  for (const b of detail.bucket_breakdown || []) {
+    buckets[b.type] = {
+      totalSpent: b.declared_total ? String(b.declared_total) : '',
+      unitsCovered: b.units_covered ? String(b.units_covered) : '',
+      isNone: b.hidden || false,
+      items: (b.items || []).map((item) => ({
+        id: crypto.randomUUID(),
+        name: item.name || '',
+        amount: item.amount ? String(item.amount) : '',
+        unitsCovered: item.units_covered ? String(item.units_covered) : '',
+        purchaseQuantity: item.quantity ? String(item.quantity) : undefined,
+        purchaseUnit: item.unit || undefined,
+        isImputed: item.is_imputed,
+        details: {},
+      })),
+    };
+  }
+
+  return {
+    productName: sheet.name,
+    kind: sheet.kind,
+    unitLabel: sheet.unit_label,
+    productionBasis: (sheet.basis as '' | 'batch' | 'monthly') || 'batch',
+    unitsProduced: detail.units_produced ? String(detail.units_produced) : '',
+    defectiveUnits: detail.defective_units ? String(detail.defective_units) : '',
+    defaultUnitsCoveredScope: detail.default_units_covered_scope || 'all',
+    currencyCode: detail.currency_code || 'LKR',
+    currencyOverridden: true,
+    pricingType: detail.pricing_type || 'markup',
+    pricingPercentage: detail.pricing_percentage ? String(detail.pricing_percentage) : '30',
+    buckets,
+    sheetId: sheet.id,
+    versionId: detail.id,
+    workspaceId: sheet.workspace_id,
+  };
 }
