@@ -27,6 +27,11 @@ import {
 import { cn } from 'cn';
 import type { BucketDraft, LineItemDraft } from '@/store/useCalculatorStore';
 import { Level3DetailsModal, getActiveLevel3Count } from './Level3DetailsModal';
+import {
+  calculateRecipeCoverageClient,
+  areUnitsCompatible,
+  POPULAR_UNITS,
+} from '@/lib/unitConverter';
 
 interface BucketCardProps {
   bucketKey: string;
@@ -94,6 +99,39 @@ const CATEGORY_THEMES: Record<
     border: 'border-cyan-500/20',
   },
 };
+
+function getRecipeCoverage(
+  purchaseQtyStr?: string,
+  purchaseUnitStr?: string,
+  usageQtyStr?: string,
+  usageUnitStr?: string
+): { unitsCovered?: number; error?: string } {
+  const pQty = parseFloat(purchaseQtyStr ?? '');
+  const uQty = parseFloat(usageQtyStr ?? '');
+  const pUnit = purchaseUnitStr?.trim() || '';
+  const uUnit = usageUnitStr?.trim() || '';
+
+  if (isNaN(pQty) || pQty <= 0 || isNaN(uQty) || uQty <= 0) {
+    return { error: 'incomplete' };
+  }
+
+  // If neither has a unit, calculate direct ratio
+  if (!pUnit && !uUnit) {
+    return { unitsCovered: pQty / uQty };
+  }
+
+  return calculateRecipeCoverageClient(pQty, pUnit || 'pcs', uQty, uUnit || 'pcs');
+}
+
+function getSuggestedUsageUnit(purchaseUnit?: string): string {
+  if (!purchaseUnit) return 'g';
+  const norm = purchaseUnit.trim().toLowerCase();
+  if (norm === 'kg' || norm === 'kilogram' || norm === 'kilo' || norm === 'kgs') return 'g';
+  if (norm === 'l' || norm === 'liter' || norm === 'litre' || norm === 'ltr') return 'ml';
+  if (norm === 'm' || norm === 'meter' || norm === 'metre' || norm === 'mtr') return 'cm';
+  if (norm === 'dz' || norm === 'dozen') return 'pcs';
+  return norm;
+}
 
 export function BucketCard({
   bucketKey,
@@ -265,19 +303,19 @@ export function BucketCard({
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
         if (hasPriorCost) {
-          // User entered data in Level 1 -> Auto-populate Item #1!
+          // User entered data in Level 1 -> Keep initial estimate, but start with a clean blank item so unallocated balance is visible
           setInitialEstimate(val);
-          const populatedItem: LineItemDraft = {
+          const blankItem: LineItemDraft = {
             id,
-            name: title,
-            amount: bucket.totalSpent.trim(),
+            name: '',
+            amount: '',
             unitsCovered: bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '',
             purchaseQuantity: '1',
             purchaseUnit: '',
             details: {},
           };
           onChange({
-            items: [populatedItem],
+            items: [blankItem],
             totalSpent: bucket.totalSpent.trim(),
           });
         } else {
@@ -641,92 +679,269 @@ export function BucketCard({
                         </div>
                       </div>
 
-                      {/* Middle Line: Purchased Qty/Unit, Total Cost, Units Covered */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 border-t border-border/50">
-                        {/* 1. Purchased Quantity & Unit */}
-                        <div className="space-y-1">
-                          <label
-                            htmlFor={`${prefix}-item-${index}-qty`}
-                            className="text-[11px] font-semibold text-muted-foreground block"
-                          >
-                            {t('colPurchased')}
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <Input
-                              id={`${prefix}-item-${index}-qty`}
-                              type="text"
-                              inputMode="decimal"
-                              value={item.purchaseQuantity ?? ''}
-                              onChange={(e) => updateItem(item.id, { purchaseQuantity: e.target.value })}
-                              placeholder="1"
-                              className="h-9 w-20 text-center text-xs font-medium"
-                              title={t('linePurchaseQuantity')}
-                            />
-                            <Input
-                              value={item.purchaseUnit ?? ''}
-                              onChange={(e) => updateItem(item.id, { purchaseUnit: e.target.value })}
-                              placeholder={t('linePurchaseUnitPlaceholder')}
-                              className="h-9 flex-1 text-xs"
-                              title={t('linePurchaseUnit')}
-                            />
-                          </div>
-                        </div>
+                      {/* Middle Line: Purchased Qty/Unit, Total Cost, Units Covered / Usage per Item */}
+                      {(() => {
+                        const isRecipe = item.details?.method === 'recipe';
+                        const itemAmt = parseFloat(item.amount) || 0;
+                        const itemCov = parseFloat(item.unitsCovered) || 0;
+                        const costPerUnit = itemCov > 0 ? (itemAmt / itemCov) : 0;
+                        const pUnit = item.purchaseUnit?.trim();
+                        const uUnit = item.details?.usage_unit?.trim();
+                        const areIncompatible = isRecipe && pUnit && uUnit && !areUnitsCompatible(pUnit, uUnit);
 
-                        {/* 2. Total Cost */}
-                        <div className="space-y-1">
-                          <label
-                            htmlFor={`${prefix}-item-${index}-amount`}
-                            className="text-[11px] font-semibold text-muted-foreground block"
-                          >
-                            {t('colTotalCost')}
-                          </label>
-                          <div className="relative">
-                            <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[11px] font-semibold text-muted-foreground">
-                              {currencyCode}
-                            </span>
-                            <Input
-                              id={`${prefix}-item-${index}-amount`}
-                              type="text"
-                              inputMode="decimal"
-                              value={item.amount}
-                              onChange={(e) => updateItem(item.id, { amount: e.target.value })}
-                              placeholder="0.00"
-                              className="h-9 pl-11 text-xs font-semibold"
-                            />
-                          </div>
-                        </div>
+                        return (
+                          <div className="space-y-2 pt-1 border-t border-border/50">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                              {/* 1. Purchased Quantity & Unit */}
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`${prefix}-item-${index}-qty`}
+                                  className="text-[11px] font-semibold text-muted-foreground block"
+                                >
+                                  {t('colPurchased')}
+                                </label>
+                                <div className="flex items-center gap-1.5">
+                                  <Input
+                                    id={`${prefix}-item-${index}-qty`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={item.purchaseQuantity ?? ''}
+                                    onChange={(e) => {
+                                      const newQty = e.target.value;
+                                      if (isRecipe) {
+                                        const res = getRecipeCoverage(newQty, item.purchaseUnit, item.details?.usage_quantity, item.details?.usage_unit);
+                                        updateItem(item.id, {
+                                          purchaseQuantity: newQty,
+                                          details: { ...(item.details || {}), method: 'recipe', purchase_quantity: newQty },
+                                          ...(res.unitsCovered ? { unitsCovered: res.unitsCovered.toFixed(2).replace(/\.00$/, '') } : {}),
+                                        });
+                                      } else {
+                                        updateItem(item.id, { purchaseQuantity: newQty });
+                                      }
+                                    }}
+                                    placeholder="1"
+                                    className="h-9 w-20 text-center text-xs font-medium"
+                                    title={t('linePurchaseQuantity')}
+                                  />
+                                  <Input
+                                    value={item.purchaseUnit ?? ''}
+                                    onChange={(e) => {
+                                      const newUnit = e.target.value;
+                                      if (isRecipe) {
+                                        const res = getRecipeCoverage(item.purchaseQuantity, newUnit, item.details?.usage_quantity, item.details?.usage_unit);
+                                        updateItem(item.id, {
+                                          purchaseUnit: newUnit,
+                                          details: { ...(item.details || {}), method: 'recipe', purchase_unit: newUnit },
+                                          ...(res.unitsCovered ? { unitsCovered: res.unitsCovered.toFixed(2).replace(/\.00$/, '') } : {}),
+                                        });
+                                      } else {
+                                        updateItem(item.id, { purchaseUnit: newUnit });
+                                      }
+                                    }}
+                                    list="common-units"
+                                    placeholder={t('linePurchaseUnitPlaceholder')}
+                                    className="h-9 flex-1 text-xs"
+                                    title={t('linePurchaseUnit')}
+                                  />
+                                </div>
+                              </div>
 
-                        {/* 3. Units Covered */}
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <label
-                              htmlFor={`${prefix}-item-${index}-units`}
-                              className="text-[11px] font-semibold text-muted-foreground block"
-                            >
-                              {t('colUnitsCovered')}
-                            </label>
-                            {monthlyUnits && Number(monthlyUnits) > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => updateItem(item.id, { unitsCovered: monthlyUnits })}
-                                className="text-[10px] text-amber-500 font-semibold flex items-center gap-0.5 hover:underline"
-                                title={t('useMonthlyOutputHint')}
-                              >
-                                <Zap className="size-2.5" /> {monthlyUnits}
-                              </button>
-                            )}
+                              {/* 2. Total Cost */}
+                              <div className="space-y-1">
+                                <label
+                                  htmlFor={`${prefix}-item-${index}-amount`}
+                                  className="text-[11px] font-semibold text-muted-foreground block"
+                                >
+                                  {t('colTotalCost')}
+                                </label>
+                                <div className="relative">
+                                  <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-[11px] font-semibold text-muted-foreground">
+                                    {currencyCode}
+                                  </span>
+                                  <Input
+                                    id={`${prefix}-item-${index}-amount`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={item.amount}
+                                    onChange={(e) => updateItem(item.id, { amount: e.target.value })}
+                                    placeholder="0.00"
+                                    className="h-9 pl-11 text-xs font-semibold"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* 3. Costing Method & Calculation: Total Made vs Per Item Usage */}
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-1">
+                                  <label
+                                    className="text-[11px] font-semibold text-muted-foreground block truncate"
+                                    title={isRecipe ? t('usedPerItem') : t('colUnitsCovered')}
+                                  >
+                                    {isRecipe ? t('usedPerItem') : t('colUnitsCovered')}
+                                  </label>
+
+                                  {/* Sleek Method Pill Switcher */}
+                                  <div className="inline-flex items-center rounded-md bg-muted/80 p-0.5 border border-border/70 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const newDetails = { ...(item.details || {}) };
+                                        delete newDetails.method;
+                                        delete newDetails.usage_quantity;
+                                        delete newDetails.usage_unit;
+                                        updateItem(item.id, { details: newDetails });
+                                      }}
+                                      className={cn(
+                                        "px-1.5 py-0.5 text-[10px] rounded transition-all flex items-center gap-0.5",
+                                        !isRecipe
+                                          ? "bg-background text-foreground shadow-2xs font-bold"
+                                          : "text-muted-foreground hover:text-foreground"
+                                      )}
+                                      title={t('modeTotalMade')}
+                                    >
+                                      <span>📦</span>
+                                      <span>{t('modeTotalMadeShort')}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const currentUUnit = item.details?.usage_unit || getSuggestedUsageUnit(item.purchaseUnit);
+                                        const currentUQty = item.details?.usage_quantity || '';
+                                        const newDetails = {
+                                          ...(item.details || {}),
+                                          method: 'recipe',
+                                          usage_unit: currentUUnit,
+                                          ...(item.purchaseQuantity ? { purchase_quantity: item.purchaseQuantity } : {}),
+                                          ...(item.purchaseUnit ? { purchase_unit: item.purchaseUnit } : {}),
+                                          ...(currentUQty ? { usage_quantity: currentUQty } : {}),
+                                        };
+                                        const res = getRecipeCoverage(item.purchaseQuantity, item.purchaseUnit, currentUQty, currentUUnit);
+                                        updateItem(item.id, {
+                                          details: newDetails,
+                                          ...(res.unitsCovered ? { unitsCovered: res.unitsCovered.toFixed(2).replace(/\.00$/, '') } : {}),
+                                        });
+                                      }}
+                                      className={cn(
+                                        "px-1.5 py-0.5 text-[10px] rounded transition-all flex items-center gap-0.5",
+                                        isRecipe
+                                          ? "bg-primary text-primary-foreground shadow-2xs font-bold"
+                                          : "text-muted-foreground hover:text-foreground"
+                                      )}
+                                      title={t('modePerItem')}
+                                    >
+                                      <span>🍰</span>
+                                      <span>{t('modePerItemShort')}</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {isRecipe ? (
+                                  /* Recipe / Per Item Mode Inputs: [ Usage Qty ] [ Usage Unit ] */
+                                  <div className="flex items-center gap-1.5">
+                                    <Input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={item.details?.usage_quantity ?? ''}
+                                      onChange={(e) => {
+                                        const newUsageQty = e.target.value;
+                                        const newDetails = {
+                                          ...(item.details || {}),
+                                          method: 'recipe',
+                                          usage_quantity: newUsageQty,
+                                          ...(item.purchaseQuantity ? { purchase_quantity: item.purchaseQuantity } : {}),
+                                          ...(item.purchaseUnit ? { purchase_unit: item.purchaseUnit } : {}),
+                                        };
+                                        const res = getRecipeCoverage(item.purchaseQuantity, item.purchaseUnit, newUsageQty, item.details?.usage_unit);
+                                        updateItem(item.id, {
+                                          details: newDetails,
+                                          ...(res.unitsCovered ? { unitsCovered: res.unitsCovered.toFixed(2).replace(/\.00$/, '') } : {}),
+                                        });
+                                      }}
+                                      placeholder={t('usedPerItemPlaceholder')}
+                                      className="h-9 w-20 text-center text-xs font-medium"
+                                      title={t('usedPerItem')}
+                                    />
+                                    <Input
+                                      type="text"
+                                      value={item.details?.usage_unit ?? ''}
+                                      onChange={(e) => {
+                                        const newUsageUnit = e.target.value;
+                                        const newDetails = {
+                                          ...(item.details || {}),
+                                          method: 'recipe',
+                                          usage_unit: newUsageUnit,
+                                          ...(item.purchaseQuantity ? { purchase_quantity: item.purchaseQuantity } : {}),
+                                          ...(item.purchaseUnit ? { purchase_unit: item.purchaseUnit } : {}),
+                                        };
+                                        const res = getRecipeCoverage(item.purchaseQuantity, item.purchaseUnit, item.details?.usage_quantity, newUsageUnit);
+                                        updateItem(item.id, {
+                                          details: newDetails,
+                                          ...(res.unitsCovered ? { unitsCovered: res.unitsCovered.toFixed(2).replace(/\.00$/, '') } : {}),
+                                        });
+                                      }}
+                                      list="common-units"
+                                      placeholder={t('usageUnitPlaceholder')}
+                                      className="h-9 flex-1 text-xs"
+                                      title={t('usageUnitPlaceholder')}
+                                    />
+                                  </div>
+                                ) : (
+                                  /* Total Made / Direct Mode: [ Units Covered ] + Quick-Pick Monthly */
+                                  <div className="flex items-center gap-1.5">
+                                    <Input
+                                      id={`${prefix}-item-${index}-units`}
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={item.unitsCovered}
+                                      onChange={(e) => updateItem(item.id, { unitsCovered: e.target.value })}
+                                      placeholder={bucket.unitsCovered || monthlyUnits || 'Units'}
+                                      className="h-9 flex-1 text-xs"
+                                    />
+                                    {monthlyUnits && Number(monthlyUnits) > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => updateItem(item.id, { unitsCovered: monthlyUnits })}
+                                        className={cn(
+                                          "h-9 px-2 rounded-md border text-[11px] font-semibold flex items-center gap-1 shrink-0 transition-colors",
+                                          item.unitsCovered === monthlyUnits
+                                            ? "bg-primary/15 text-primary border-primary/30"
+                                            : "bg-secondary text-secondary-foreground hover:bg-secondary/80 border-border/60"
+                                        )}
+                                        title={t('useMonthlyOutputHint')}
+                                      >
+                                        <Zap className="size-3 text-amber-500" />
+                                        <span>{monthlyUnits}</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Live Unit Cost & Coverage Guidance Banner */}
+                            {areIncompatible ? (
+                              <div className="flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-md border border-amber-500/25">
+                                <span>⚠️</span>
+                                <span>{t('incompatibleUnitWarn', { pUnit: pUnit || '?', uUnit: uUnit || '?' })}</span>
+                              </div>
+                            ) : isRecipe && itemCov > 0 ? (
+                              <div className="flex items-center justify-between text-[11px] text-emerald-800 dark:text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/25 font-medium">
+                                <span>
+                                  {t('calcCoversResult', {
+                                    units: itemCov.toLocaleString(undefined, { maximumFractionDigits: 2 }),
+                                    cost: `${currencyCode} ${costPerUnit.toFixed(2)}`,
+                                  })}
+                                </span>
+                              </div>
+                            ) : !isRecipe && itemCov > 0 && itemAmt > 0 ? (
+                              <div className="flex justify-end text-[11px] text-muted-foreground px-1 font-medium">
+                                <span>{t('calcCostPerUnitResult', { cost: `${currencyCode} ${costPerUnit.toFixed(2)}` })}</span>
+                              </div>
+                            ) : null}
                           </div>
-                          <Input
-                            id={`${prefix}-item-${index}-units`}
-                            type="text"
-                            inputMode="decimal"
-                            value={item.unitsCovered}
-                            onChange={(e) => updateItem(item.id, { unitsCovered: e.target.value })}
-                            placeholder={bucket.unitsCovered || monthlyUnits || 'Units'}
-                            className="h-9 text-xs"
-                          />
-                        </div>
-                      </div>
+                        );
+                      })()}
 
                       {/* Bottom Line: Last Pick -> Advanced Settings Trigger */}
                       <div className="flex items-center justify-between pt-2 border-t border-border/40 text-xs">
@@ -886,6 +1101,15 @@ export function BucketCard({
           }
         }}
       />
+
+      {/* Global Datalist for Popular Measurement Units */}
+      <datalist id="common-units">
+        {POPULAR_UNITS.map((u) => (
+          <option key={u.value} value={u.value}>
+            {u.label}
+          </option>
+        ))}
+      </datalist>
     </article>
   );
 }
