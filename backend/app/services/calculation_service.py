@@ -237,12 +237,43 @@ def _process_bucket(
     output_items: List[LineItemOutput] = []
 
     for item in bucket.items:
-        covered = item.units_covered if item.units_covered and item.units_covered > ZERO else bucket_units
+        details = dict(item.details)
+        recipe_method = details.get("method") or details.get("cost_method")
+        is_recipe = (
+            recipe_method in {"recipe", "bom"}
+            or ("usage_quantity" in details and "usage_unit" in details)
+        )
+        if is_recipe:
+            from app.services.unit_converter import calculate_recipe_coverage
+
+            usage_qty = _detail(item, "usage_quantity")
+            usage_unit = str(details.get("usage_unit")).strip()
+            purchase_qty = (
+                _detail(item, "purchase_quantity")
+                if "purchase_quantity" in details
+                else item.quantity
+            )
+            purchase_unit = (
+                str(details.get("purchase_unit")).strip()
+                if "purchase_unit" in details
+                else (item.unit.strip() if item.unit else "")
+            )
+            covered = calculate_recipe_coverage(
+                purchase_qty, purchase_unit, usage_qty, usage_unit
+            )
+            details["calculated_coverage"] = str(_round_num(covered))
+            details["method"] = "recipe"
+        else:
+            covered = item.units_covered if item.units_covered and item.units_covered > ZERO else bucket_units
+
         amount = _calculate_line_amount(item, covered)
         cpu = amount / covered
+        if is_recipe:
+            details["cost_per_recipe_unit"] = str(_round_num(cpu))
+
         variable_percentage = (
             _detail(item, "variable_percentage")
-            if "variable_percentage" in item.details
+            if "variable_percentage" in details
             else HUNDRED if item.cost_behavior == "variable" else ZERO
         )
         variable_amount = amount * variable_percentage / HUNDRED
@@ -273,7 +304,7 @@ def _process_bucket(
             pinned=item.pinned,
             is_imputed=item.is_imputed,
             cost_behavior=item.cost_behavior,
-            details=item.details,
+            details=details,
         ))
 
     declared_cpu = bucket.declared_total / bucket_units

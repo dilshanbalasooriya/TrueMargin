@@ -111,6 +111,49 @@ class LineItemInput(BaseModel):
             > _detail_decimal(self.details, "allocation_total_measure")
         ):
             raise ValueError("Allocation measures must be positive and the assigned share cannot exceed the total.")
+
+        # Recipe / BOM validation
+        recipe_method = self.details.get("method") or self.details.get("cost_method")
+        has_recipe_data = (
+            recipe_method in {"recipe", "bom"}
+            or self.details.get("usage_quantity") is not None
+            or self.details.get("usage_unit") is not None
+        )
+        if has_recipe_data:
+            if self.details.get("usage_quantity") is None:
+                raise ValueError("usage_quantity is required for recipe/BOM items.")
+            usage_qty = _detail_decimal(self.details, "usage_quantity")
+            if usage_qty <= Decimal("0"):
+                raise ValueError("usage_quantity must be greater than zero.")
+
+            usage_unit = self.details.get("usage_unit")
+            if not usage_unit or not str(usage_unit).strip():
+                raise ValueError("usage_unit is required for recipe/BOM items.")
+
+            purchase_qty = (
+                _detail_decimal(self.details, "purchase_quantity")
+                if self.details.get("purchase_quantity") is not None
+                else self.quantity
+            )
+            if purchase_qty <= Decimal("0"):
+                raise ValueError("purchase_quantity must be greater than zero.")
+
+            purchase_unit = (
+                str(self.details.get("purchase_unit")).strip()
+                if self.details.get("purchase_unit") is not None
+                else (self.unit.strip() if self.unit else "")
+            )
+            if not purchase_unit:
+                raise ValueError("purchase_unit is required for recipe/BOM items.")
+
+            from app.services.unit_converter import are_units_compatible
+
+            if not are_units_compatible(purchase_unit, str(usage_unit).strip()):
+                raise ValueError(
+                    f"Incompatible recipe units: '{purchase_unit}' and '{usage_unit}'. "
+                    f"Both units must be of the same measurement type (e.g., mass, volume, or length)."
+                )
+
         return self
 
 
