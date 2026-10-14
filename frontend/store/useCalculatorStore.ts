@@ -40,6 +40,8 @@ export interface GuestDraft {
 interface CalculatorState {
   draft: GuestDraft;
   hydrated: boolean;
+  setupCollapsed: boolean;
+  setSetupCollapsed: (collapsed: boolean) => void;
   updateDraft: (updates: Partial<GuestDraft>) => void;
   updateBucket: (key: string, updates: Partial<BucketDraft>) => void;
   setHydrated: (hydrated: boolean) => void;
@@ -48,6 +50,7 @@ interface CalculatorState {
   isDirty: boolean;
   setIsDirty: (dirty: boolean) => void;
   markClean: () => void;
+  resetCount: number;
 }
 
 const initialDraft: GuestDraft = {
@@ -74,10 +77,10 @@ const emptyBucket: BucketDraft = {
 
 function migrateDraft(persistedState: unknown): Partial<CalculatorState> {
   if (!persistedState || typeof persistedState !== 'object') {
-    return { draft: initialDraft };
+    return { draft: initialDraft, setupCollapsed: false };
   }
 
-  const state = persistedState as { draft?: Partial<GuestDraft> };
+  const state = persistedState as { draft?: Partial<GuestDraft>; setupCollapsed?: boolean };
   const oldBuckets = state.draft?.buckets as
     | Record<string, Partial<BucketDraft> & { key?: string }>
     | undefined;
@@ -97,10 +100,20 @@ function migrateDraft(persistedState: unknown): Partial<CalculatorState> {
     buckets,
   };
   if (draft.unitLabel === 'unit') draft.unitLabel = '';
-  if (!state.draft?.productionBasis) draft.productionBasis = '';
-  if (!state.draft?.defaultUnitsCoveredScope) draft.defaultUnitsCoveredScope = '';
+  if (!draft.productionBasis) draft.productionBasis = 'monthly';
+  if (!draft.defaultUnitsCoveredScope) draft.defaultUnitsCoveredScope = 'all';
 
-  return { draft };
+  const isComplete = Boolean(
+    draft.productName.trim() &&
+    draft.unitLabel.trim() &&
+    Number(draft.unitsProduced.trim()) > 0,
+  );
+
+  const setupCollapsed = isComplete && (typeof state.setupCollapsed === 'boolean'
+    ? state.setupCollapsed
+    : true);
+
+  return { draft, setupCollapsed };
 }
 
 export const useCalculatorStore = create<CalculatorState>()(
@@ -108,6 +121,8 @@ export const useCalculatorStore = create<CalculatorState>()(
     (set) => ({
       draft: initialDraft,
       hydrated: false,
+      setupCollapsed: false,
+      setSetupCollapsed: (setupCollapsed) => set({ setupCollapsed }),
       updateDraft: (updates) =>
         set((state) => ({ draft: { ...state.draft, ...updates } })),
       updateBucket: (key, updates) =>
@@ -125,11 +140,28 @@ export const useCalculatorStore = create<CalculatorState>()(
           },
         })),
       setHydrated: (hydrated) => set({ hydrated }),
-      resetDraft: () => set({ draft: initialDraft, isDirty: false }),
-      loadDraft: (draft) => set({ draft, isDirty: false }),
+      resetDraft: () =>
+        set((state) => ({
+          draft: initialDraft,
+          setupCollapsed: false,
+          isDirty: false,
+          resetCount: (state.resetCount || 0) + 1,
+        })),
+      loadDraft: (draft) =>
+        set((state) => ({
+          draft,
+          setupCollapsed: Boolean(
+            draft.productName.trim() &&
+            draft.unitLabel.trim() &&
+            Number(draft.unitsProduced.trim()) > 0,
+          ),
+          isDirty: false,
+          resetCount: (state.resetCount || 0) + 1,
+        })),
       isDirty: false,
       setIsDirty: (isDirty) => set({ isDirty }),
       markClean: () => set({ isDirty: false }),
+      resetCount: 0,
     }),
     {
       name: 'truemargin-guest-draft',

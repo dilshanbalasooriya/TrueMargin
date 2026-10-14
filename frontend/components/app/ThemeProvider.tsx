@@ -20,7 +20,13 @@ const THEME_CHANGE_EVENT = 'truemargin-theme-change';
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function getThemeSnapshot(): Theme {
-  return window.localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (stored === 'dark') return 'dark';
+  if (stored === 'light') return 'light';
+  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
 }
 
 function getServerThemeSnapshot(): Theme {

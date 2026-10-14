@@ -19,6 +19,7 @@ import { useCalculatorStore } from '@/store/useCalculatorStore';
 import { useSidebarStore } from '@/store/useSidebarStore';
 import { BUSINESS_TEMPLATES, getTemplateDraft, type BusinessTemplate } from '@/lib/templates';
 import { createClient } from '@/lib/supabase/client';
+import { toast } from '@/store/useToast';
 import {
   Calculator,
   ChevronLeft,
@@ -83,24 +84,35 @@ export function AppSidebar() {
     if (!userId) return;
     let active = true;
 
-    void syncUserProfile()
-      .then((profile) => {
-        const workspaceId = profile.workspaces[0]?.id;
-        if (!workspaceId) throw new Error('No workspace found');
-        return listCostSheets(workspaceId);
-      })
-      .then((data) => {
-        if (active) setSheets(data);
-      })
-      .catch(() => {
-        if (active) setSheets([]);
-      })
-      .finally(() => {
-        if (active) setLoadedUserId(userId);
-      });
+    const fetchSheets = () => {
+      void syncUserProfile()
+        .then((profile) => {
+          const workspaceId = profile.workspaces[0]?.id;
+          if (!workspaceId) throw new Error('No workspace found');
+          return listCostSheets(workspaceId);
+        })
+        .then((data) => {
+          if (active) setSheets(data);
+        })
+        .catch(() => {
+          if (active) setSheets([]);
+        })
+        .finally(() => {
+          if (active) setLoadedUserId(userId);
+        });
+    };
+
+    fetchSheets();
+
+    const handleSheetsUpdated = () => {
+      fetchSheets();
+    };
+
+    window.addEventListener('truemargin-sheets-updated', handleSheetsUpdated);
 
     return () => {
       active = false;
+      window.removeEventListener('truemargin-sheets-updated', handleSheetsUpdated);
     };
   }, [userId]);
 
@@ -182,8 +194,10 @@ export function AppSidebar() {
       if (draft.sheetId === sheetId) {
         resetDraft();
       }
+      toast.success(t('deleteSuccess'));
+      window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'delete', sheetId } }));
     } catch {
-      alert(t('deleteError'));
+      toast.error(t('deleteError'));
     } finally {
       setDeletingId(null);
     }

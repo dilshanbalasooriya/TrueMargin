@@ -36,6 +36,7 @@ export function getActiveLevel3Count(item: LineItemDraft, bucketKey: string): nu
     } else if (bucketKey === 'labor') {
       if (item.details.statutory_percentage?.trim()) count++;
       if (item.details.bonus_percentage?.trim()) count++;
+      if (item.details.allocation_percentage?.trim() && item.details.allocation_percentage.trim() !== '100') count++;
     } else if (bucketKey === 'transport') {
       if (item.details.direction && item.details.direction !== 'shared') count++;
       if (item.details.allocation_basis && item.details.allocation_basis !== 'quantity') count++;
@@ -215,6 +216,19 @@ function Level3Form({
                 suffix="%"
                 placeholder="e.g. 10"
               />
+              <div className="sm:col-span-2">
+                <DetailNumberInput
+                  id={`${prefix}-allocation`}
+                  label={t('allocationPercentageLabel')}
+                  value={details.allocation_percentage ?? ''}
+                  onChange={(value) => updateDetail('allocation_percentage', value)}
+                  suffix="%"
+                  placeholder="100"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t('allocationPercentageHint')}
+                </p>
+              </div>
               <div className="sm:col-span-2 pt-1">
                 <label className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-background cursor-pointer hover:bg-muted/40 transition-colors">
                   <input

@@ -161,6 +161,9 @@ export function buildCalculationRequest(draft: GuestDraft, locale = 'en') {
             ? normalizeDecimalInput(item.unitsCovered, locale)
             : undefined,
           is_imputed: item.isImputed ?? false,
+          ...(item.details?.cost_behavior
+            ? { cost_behavior: item.details.cost_behavior as 'variable' | 'fixed' }
+            : {}),
           details: Object.fromEntries(
             Object.entries(item.details ?? {})
               .filter(([detailKey, value]) =>
@@ -263,7 +266,20 @@ async function fetchApi<T>(
     );
   }
 
-  return (await response.json()) as T;
+  if (response.status === 204 || response.headers.get('content-length') === '0') {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  if (!text || text.trim() === '') {
+    return undefined as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return undefined as T;
+  }
 }
 
 export function calculateCostSheet(

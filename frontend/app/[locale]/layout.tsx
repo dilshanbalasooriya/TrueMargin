@@ -55,11 +55,16 @@ export default async function LocaleLayout({
   const user = session?.user ?? null;
 
   return (
-    <html lang={locale} suppressHydrationWarning className={`${plusJakartaSans.variable} ${notoSansSinhala.variable} h-full antialiased`}>
+    <html lang={locale} suppressHydrationWarning className={`${plusJakartaSans.variable} ${notoSansSinhala.variable} h-full antialiased bg-background text-foreground`}>
       <head>
         <meta name="darkreader-lock" content="" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var el=document.documentElement;if(d){el.classList.add('dark');el.style.colorScheme='dark';}else{el.classList.remove('dark');el.style.colorScheme='light';}}catch(e){}})();`,
+          }}
+        />
       </head>
-      <body className="min-h-full flex flex-col font-sans" suppressHydrationWarning>
+      <body className="min-h-full flex flex-col font-sans bg-background text-foreground" suppressHydrationWarning>
         <ThemeProvider>
           <NextIntlClientProvider messages={messages}>
             <AuthProvider initialUser={user} initialSession={session}>

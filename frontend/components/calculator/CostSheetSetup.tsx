@@ -12,6 +12,7 @@ interface CostSheetSetupProps {
   onChange: (updates: Partial<GuestDraft>) => void;
   isCollapsed?: boolean;
   onToggleCollapse?: (collapsed: boolean) => void;
+  onContinue?: () => void;
 }
 
 export function CostSheetSetup({
@@ -19,6 +20,7 @@ export function CostSheetSetup({
   onChange,
   isCollapsed: controlledCollapsed,
   onToggleCollapse,
+  onContinue,
 }: CostSheetSetupProps) {
   const t = useTranslations('Calculator');
   const locale = useLocale();
@@ -39,11 +41,8 @@ export function CostSheetSetup({
   const isVolumeValid = Boolean(draft.unitsProduced.trim() && !isNaN(parsedVolume) && parsedVolume > 0);
   const isAllValid = isNameValid && isUnitValid && isVolumeValid;
 
-  // Internal collapse state if not controlled externally (only collapsed if all mandatory fields are valid)
-  const [internalCollapsed, setInternalCollapsed] = useState(() => {
-    const vol = Number(draft.unitsProduced.trim());
-    return Boolean(draft.productName.trim() && draft.unitLabel.trim() && !isNaN(vol) && vol > 0);
-  });
+  // Internal collapse state if not controlled externally
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
 
   const isCollapsed = controlledCollapsed !== undefined ? controlledCollapsed : internalCollapsed;
 
@@ -64,6 +63,7 @@ export function CostSheetSetup({
       });
     }
   }, [draft.productionBasis, draft.defaultUnitsCoveredScope, onChange]);
+
 
   const handleContinue = () => {
     setSubmitted(true);
@@ -91,9 +91,22 @@ export function CostSheetSetup({
       defaultUnitsCoveredScope: draft.defaultUnitsCoveredScope || 'all',
     });
     setCollapsed(true);
-    const costsHeading = document.getElementById('costs-heading');
-    if (costsHeading) {
-      costsHeading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    if (onContinue) {
+      onContinue();
+    } else {
+      window.setTimeout(() => {
+        const firstKey = draft.kind === 'service' ? 'labor' : 'material';
+        const targetInput = document.getElementById(`bucket-${firstKey}-amount`);
+        if (targetInput) {
+          targetInput.focus({ preventScroll: true });
+          const rect = targetInput.getBoundingClientRect();
+          const isComfortablyVisible = rect.top >= 80 && rect.bottom <= (window.innerHeight - 60);
+          if (!isComfortablyVisible) {
+            targetInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      }, 120);
     }
   };
 
@@ -253,6 +266,12 @@ export function CostSheetSetup({
                     : t('namePlaceholder')
                 }
                 autoComplete="off"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('unit-label')?.focus();
+                  }
+                }}
                 className={`h-10 w-full rounded-lg border bg-background/60 pl-9 pr-3 text-sm font-medium outline-none transition-all placeholder:text-muted-foreground/50 ${
                   showNameError
                     ? 'border-destructive bg-destructive/5 text-foreground placeholder:text-destructive/40 focus:border-destructive focus:ring-2 focus:ring-destructive/20'
@@ -291,6 +310,12 @@ export function CostSheetSetup({
                   }
                   placeholder={t('unitNamePlaceholder')}
                   autoComplete="off"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      document.getElementById('units-produced')?.focus();
+                    }
+                  }}
                   className={`h-10 w-full rounded-lg border bg-background/60 pl-9 pr-3 text-sm font-medium outline-none transition-all placeholder:text-muted-foreground/50 ${
                     showUnitError
                       ? 'border-destructive bg-destructive/5 text-foreground placeholder:text-destructive/40 focus:border-destructive focus:ring-2 focus:ring-destructive/20'
@@ -334,6 +359,12 @@ export function CostSheetSetup({
                   }
                   placeholder={t('monthlyVolumePlaceholder')}
                   autoComplete="off"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleContinue();
+                    }
+                  }}
                   className={`h-10 w-full rounded-lg border bg-background/60 pl-9 pr-14 text-sm font-medium outline-none transition-all placeholder:text-muted-foreground/50 ${
                     showVolumeError
                       ? 'border-destructive bg-destructive/5 text-foreground placeholder:text-destructive/40 focus:border-destructive focus:ring-2 focus:ring-destructive/20'

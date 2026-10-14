@@ -7,16 +7,27 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { Link } from '@/i18n/routing';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { downloadVersionReport, listCostSheets, syncUserProfile } from '@/lib/api-client';
-import type { CostSheet } from '@/lib/api-client';
-import { ArrowDownToLine, LoaderCircle, Printer } from 'lucide-react';
+import {
+  deleteCostSheet,
+  downloadVersionReport,
+  listCostSheets,
+  syncUserProfile,
+  type CostSheet,
+} from '@/lib/api-client';
+import { useCalculatorStore } from '@/store/useCalculatorStore';
+import { ArrowDownToLine, LoaderCircle, Printer, Trash2 } from 'lucide-react';
+import { toast } from '@/store/useToast';
 
 export function SavedSheetsPage() {
   const t = useTranslations('Sheets');
   const locale = useLocale();
   const { user, loading: authLoading } = useAuth();
+  const draftSheetId = useCalculatorStore((s) => s.draft.sheetId);
+  const resetDraft = useCalculatorStore((s) => s.resetDraft);
+
   const [sheets, setSheets] = useState<CostSheet[]>([]);
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [reportError, setReportError] = useState(false);
 
@@ -27,27 +38,38 @@ export function SavedSheetsPage() {
     if (!userId) return;
     let active = true;
 
-    void syncUserProfile()
-      .then((profile) => {
-        const workspaceId = profile.workspaces[0]?.id;
-        if (!workspaceId) throw new Error('No workspace found.');
-        return listCostSheets(workspaceId);
-      })
-      .then((items) => {
-        if (active) {
-          setSheets(items);
-          setError(false);
-        }
-      })
-      .catch(() => {
-        if (active) setError(true);
-      })
-      .finally(() => {
-        if (active) setLoadedUserId(userId);
-      });
+    const fetchSheets = () => {
+      void syncUserProfile()
+        .then((profile) => {
+          const workspaceId = profile.workspaces[0]?.id;
+          if (!workspaceId) throw new Error('No workspace found.');
+          return listCostSheets(workspaceId);
+        })
+        .then((items) => {
+          if (active) {
+            setSheets(items);
+            setError(false);
+          }
+        })
+        .catch(() => {
+          if (active) setError(true);
+        })
+        .finally(() => {
+          if (active) setLoadedUserId(userId);
+        });
+    };
+
+    fetchSheets();
+
+    const handleSheetsUpdated = () => {
+      fetchSheets();
+    };
+
+    window.addEventListener('truemargin-sheets-updated', handleSheetsUpdated);
 
     return () => {
       active = false;
+      window.removeEventListener('truemargin-sheets-updated', handleSheetsUpdated);
     };
   }, [userId]);
 
@@ -100,6 +122,24 @@ export function SavedSheetsPage() {
     }
   };
 
+  const handleDeleteSheet = async (sheetId: string) => {
+    if (!window.confirm(t('deleteConfirm'))) return;
+    setDeletingId(sheetId);
+    try {
+      await deleteCostSheet(sheetId);
+      setSheets((prev) => prev.filter((s) => s.id !== sheetId));
+      if (draftSheetId === sheetId) {
+        resetDraft();
+      }
+      toast.success(t('deleteSuccess'));
+      window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'delete', sheetId } }));
+    } catch {
+      toast.error(t('deleteError'));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
         <div className="mb-7">
@@ -136,6 +176,7 @@ export function SavedSheetsPage() {
           <div className="space-y-3">
             {sheets.map((sheet) => {
               const version = sheet.current_version;
+              const isDeletingThis = deletingId === sheet.id;
               return (
                 <Card key={sheet.id} className="gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                   <div className="min-w-0">
@@ -146,12 +187,12 @@ export function SavedSheetsPage() {
                         : t('noVersion')}
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                  <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0 sm:items-center">
                     <Button
                       type="button"
                       variant="outline"
                       className="min-h-11"
-                      disabled={!version}
+                      disabled={!version || isDeletingThis}
                       onClick={() => void downloadCsv(sheet)}
                     >
                       <ArrowDownToLine className="size-4" aria-hidden="true" />
@@ -161,11 +202,25 @@ export function SavedSheetsPage() {
                       type="button"
                       variant="outline"
                       className="min-h-11"
-                      disabled={!version}
+                      disabled={!version || isDeletingThis}
                       onClick={() => void openPrintView(sheet)}
                     >
                       <Printer className="size-4" aria-hidden="true" />
                       {t('printReport')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11 text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+                      disabled={isDeletingThis}
+                      onClick={() => void handleDeleteSheet(sheet.id)}
+                    >
+                      {isDeletingThis ? (
+                        <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Trash2 className="size-4" aria-hidden="true" />
+                      )}
+                      {t('deleteSheet')}
                     </Button>
                   </div>
                 </Card>

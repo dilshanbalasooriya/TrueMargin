@@ -21,8 +21,8 @@ import type { BucketDraft, GuestDraft } from '@/store/useCalculatorStore';
 const BUCKETS = [
   { key: 'material', titleKey: 'materials', questionKey: 'materialsQuestion' },
   { key: 'labor', titleKey: 'labor', questionKey: 'laborQuestion' },
-  { key: 'transport', titleKey: 'transport', questionKey: 'transportQuestion' },
   { key: 'overhead', titleKey: 'overhead', questionKey: 'overheadQuestion' },
+  { key: 'transport', titleKey: 'transport', questionKey: 'transportQuestion' },
   { key: 'machinery', titleKey: 'machinery', questionKey: 'machineryQuestion' },
   { key: 'custom_fees', titleKey: 'customFees', questionKey: 'customFeesQuestion' },
 ] as const;
@@ -172,10 +172,13 @@ export function CalculatorPage() {
   const {
     draft,
     hydrated,
+    setupCollapsed,
+    setSetupCollapsed,
     updateDraft,
     updateBucket,
     setIsDirty,
     markClean,
+    resetCount,
   } = useCalculatorStore();
   const { user } = useAuth();
 
@@ -184,6 +187,14 @@ export function CalculatorPage() {
   const [calculationError, setCalculationError] = useState<CalculationError | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [expandedBucketKey, setExpandedBucketKey] = useState<string | null>(() => {
+    const isComplete = Boolean(
+      draft.productName.trim() &&
+      draft.unitLabel.trim() &&
+      Number(draft.unitsProduced.trim()) > 0,
+    );
+    return isComplete ? (draft.kind === 'service' ? 'labor' : 'material') : null;
+  });
   const requestSequence = useRef(0);
   const profileUserId = useRef<string | null>(null);
   const resultRef = useRef<CalculationResult | null>(null);
@@ -208,6 +219,37 @@ export function CalculatorPage() {
   useEffect(() => {
     void useCalculatorStore.persist.rehydrate();
   }, []);
+
+  // Reset or initialize expanded bucket when draft resets, loads, or switches
+  useEffect(() => {
+    const isComplete = Boolean(
+      draft.productName.trim() &&
+      draft.unitLabel.trim() &&
+      Number(draft.unitsProduced.trim()) > 0,
+    );
+    if (isComplete) {
+      setExpandedBucketKey(draft.kind === 'service' ? 'labor' : 'material');
+    } else {
+      setExpandedBucketKey(null);
+    }
+  }, [resetCount, draft.kind]);
+
+  const handleSetupContinue = () => {
+    setSetupCollapsed(true);
+    const firstKey = draft.kind === 'service' ? 'labor' : 'material';
+    setExpandedBucketKey(firstKey);
+    window.setTimeout(() => {
+      const targetInput = document.getElementById(`bucket-${firstKey}-amount`);
+      if (targetInput) {
+        targetInput.focus({ preventScroll: true });
+        const rect = targetInput.getBoundingClientRect();
+        const isComfortablyVisible = rect.top >= 80 && rect.bottom <= (window.innerHeight - 60);
+        if (!isComfortablyVisible) {
+          targetInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }, 120);
+  };
 
   useEffect(() => {
     if (!hydrated || !user) {
@@ -299,8 +341,8 @@ export function CalculatorPage() {
       return [
         { key: 'labor', titleKey: 'labor', questionKey: 'laborQuestion' },
         { key: 'material', titleKey: 'materials', questionKey: 'materialsQuestion' },
-        { key: 'transport', titleKey: 'transport', questionKey: 'transportQuestion' },
         { key: 'overhead', titleKey: 'overhead', questionKey: 'overheadQuestion' },
+        { key: 'transport', titleKey: 'transport', questionKey: 'transportQuestion' },
         { key: 'machinery', titleKey: 'machinery', questionKey: 'machineryQuestion' },
         { key: 'custom_fees', titleKey: 'customFees', questionKey: 'customFeesQuestion' },
       ] as const;
@@ -347,6 +389,7 @@ export function CalculatorPage() {
       markClean();
       setSaved(true);
       toast.success(t('saveSuccess'));
+      window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'save' } }));
     } catch (error: unknown) {
       if (error instanceof ApiError && error.status === 401) {
         toast.error(t('saveNeedsLogin'));
@@ -443,13 +486,21 @@ export function CalculatorPage() {
 
         <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-8">
           <div className="min-w-0 space-y-8">
-            <CostSheetSetup draft={draft} onChange={changeDraft} />
+            <CostSheetSetup
+              key={`setup-${resetCount}-${draft.sheetId || 'new'}`}
+              draft={draft}
+              onChange={changeDraft}
+              isCollapsed={setupCollapsed}
+              onToggleCollapse={setSetupCollapsed}
+              onContinue={handleSetupContinue}
+            />
 
             {!isSetupComplete && (
               <div
                 role="button"
                 tabIndex={0}
                 onClick={() => {
+                  setSetupCollapsed(false);
                   document.getElementById('cost-sheet-name')?.focus();
                   toast.info(t('costsLockedNotice'));
                 }}
@@ -512,36 +563,40 @@ export function CalculatorPage() {
               </div>
               <div className="space-y-3">
                 {orderedBuckets.map(({ key, titleKey, questionKey }) => (
-                  <BucketCard
-                    key={key}
-                    bucketKey={key}
-                    title={t(titleKey)}
-                    question={t(questionKey)}
-                    bucket={draft.buckets[key] ?? {
-                      totalSpent: '',
-                      unitsCovered: '',
-                      isNone: false,
-                      items: [],
-                    }}
-                    currencyCode={draft.currencyCode}
-                    unitsCoveredRequired={
-                      draft.defaultUnitsCoveredScope === 'overhead_only'
-                      && key !== 'overhead'
-                      && !draft.buckets[key]?.isNone
-                      && Boolean(
-                        draft.buckets[key]?.totalSpent.trim()
-                        || draft.buckets[key]?.items.some((item) => item.name.trim() || item.amount.trim()),
-                      )
-                    }
-                    defaultUnitsCovered={
-                      draft.defaultUnitsCoveredScope === 'all' || key === 'overhead'
-                        ? result?.good_units
-                        : undefined
-                    }
-                    monthlyUnits={draft.unitsProduced}
-                    unitLabel={draft.unitLabel}
-                    onChange={(updates) => changeBucket(key, updates)}
-                  />
+                  <div key={`${resetCount}-${draft.sheetId || 'new'}-${key}`}>
+                    <BucketCard
+                      key={`${resetCount}-${draft.sheetId || 'new'}-${key}`}
+                      bucketKey={key}
+                      title={t(titleKey)}
+                      question={t(questionKey)}
+                      bucket={draft.buckets[key] ?? {
+                        totalSpent: '',
+                        unitsCovered: '',
+                        isNone: false,
+                        items: [],
+                      }}
+                      currencyCode={draft.currencyCode}
+                      unitsCoveredRequired={
+                        draft.defaultUnitsCoveredScope === 'overhead_only'
+                        && key !== 'overhead'
+                        && !draft.buckets[key]?.isNone
+                        && Boolean(
+                          draft.buckets[key]?.totalSpent.trim()
+                          || draft.buckets[key]?.items.some((item) => item.name.trim() || item.amount.trim()),
+                        )
+                      }
+                      defaultUnitsCovered={
+                        draft.defaultUnitsCoveredScope === 'all' || key === 'overhead'
+                          ? result?.good_units
+                          : undefined
+                      }
+                      monthlyUnits={draft.unitsProduced}
+                      unitLabel={draft.unitLabel}
+                      isExpanded={expandedBucketKey === key}
+                      onToggleExpand={(expanded) => setExpandedBucketKey(expanded ? key : null)}
+                      onChange={(updates) => changeBucket(key, updates)}
+                    />
+                  </div>
                 ))}
               </div>
               <details className="rounded-xl border border-border bg-card p-4 sm:p-5">

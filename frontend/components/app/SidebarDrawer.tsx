@@ -171,6 +171,7 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
       if (draft.sheetId === sheetId) {
         resetDraft();
       }
+      window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'delete', sheetId } }));
     } catch {
       alert(t('deleteError'));
     } finally {
