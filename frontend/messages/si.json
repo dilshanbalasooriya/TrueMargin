@@ -181,7 +181,7 @@
     "discardUnallocatedAction": "ශේෂය ඉවත් කරන්න",
     "exceededBadge": "මූලික අනුමානයට වඩා +{amount} කින් වැඩියි (+{percent}%)",
     "dismissComparison": "හරි",
-    "batchCostNote": "කාණ්ඩයට අදාළ වියදම: {batchAmount} (මුළු මිලදී ගැනීම් {rawAmount})",
+    "batchCostNote": "මෙම නිෂ්පාදනයට වැයවන කොටස: {batchAmount} (මිලදී ගත් මුළු එකතුව {rawAmount})",
     "itemsBreakdownHeading": "අයිතම වෙන් කිරීම",
     "lastPickAdvancedHint": "අවශ්‍ය නම්: අපතේ යාම, ප්‍රවාහනය හෝ break-even",
     "advancedConfigured": "නීති {count}ක් සක්‍රියයි",

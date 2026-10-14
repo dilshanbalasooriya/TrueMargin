@@ -181,7 +181,7 @@
     "discardUnallocatedAction": "Discard Balance",
     "exceededBadge": "Exceeds initial guess by +{amount} (+{percent}%)",
     "dismissComparison": "Dismiss",
-    "batchCostNote": "Batch cost: {batchAmount} (from {rawAmount} total purchases)",
+    "batchCostNote": "Used for this production run: {batchAmount} (from {rawAmount} total purchased)",
     "itemsBreakdownHeading": "Itemized Breakdown",
     "lastPickAdvancedHint": "Optional: wastage, freight, or break-even",
     "advancedConfigured": "{count} active rule(s)",

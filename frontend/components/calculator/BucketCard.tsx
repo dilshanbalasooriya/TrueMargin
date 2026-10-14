@@ -130,6 +130,12 @@ export function BucketCard({
   };
   const CategoryIcon = theme.icon;
 
+  // User's direct itemized cost sum (what the user actually typed into the boxes)
+  const itemSum = bucket.items.reduce((acc, it) => {
+    const val = parseFloat(it.amount);
+    return acc + (isNaN(val) ? 0 : val);
+  }, 0);
+
   // Level 1 batch coverage units (defaulting to monthlyUnits or defaultUnitsCovered or 1)
   const batchCoverageUnits =
     parseFloat(bucket.unitsCovered || monthlyUnits || defaultUnitsCovered || '1') || 1;
@@ -139,42 +145,32 @@ export function BucketCard({
     const val = parseFloat(it.amount);
     if (isNaN(val) || val <= 0) return acc;
     const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
-    return acc + (val / itCoverage * batchCoverageUnits);
+    return acc + ((val / itCoverage) * batchCoverageUnits);
   }, 0);
-
-  // Raw cash outlay (sum of amounts entered)
-  const rawItemSum = bucket.items.reduce((acc, it) => {
-    const val = parseFloat(it.amount);
-    return acc + (isNaN(val) ? 0 : val);
-  }, 0);
-
-  // Effective sum for reconciliation is the batch-allocated sum
-  const effectiveItemSum = batchAllocatedItemSum;
 
   const hasInitialGuess = initialEstimate !== null && initialEstimate > 0;
   const hasItems = bucket.items.length > 0;
 
-  const unallocatedCost = hasInitialGuess ? Math.max(0, initialEstimate - effectiveItemSum) : 0;
-  const exceededCost = hasInitialGuess ? Math.max(0, effectiveItemSum - initialEstimate) : 0;
+  // Level 1 -> Level 2 comparison is based on the real cash amount the user typed
+  const unallocatedCost = hasInitialGuess ? Math.max(0, initialEstimate - itemSum) : 0;
+  const exceededCost = hasInitialGuess ? Math.max(0, itemSum - initialEstimate) : 0;
   const isExceeded = exceededCost > 0.01;
   const isMatched =
-    hasInitialGuess && Math.abs(effectiveItemSum - initialEstimate) <= 0.01 && effectiveItemSum > 0;
+    hasInitialGuess && Math.abs(itemSum - initialEstimate) <= 0.01 && itemSum > 0;
 
   const updateItem = (id: string, updates: Partial<LineItemDraft>) => {
     const nextItems = bucket.items.map((item) => (item.id === id ? { ...item, ...updates } : item));
-    const nextBatchSum = nextItems.reduce((acc, it) => {
+    const nextSum = nextItems.reduce((acc, it) => {
       const val = parseFloat(it.amount);
-      if (isNaN(val) || val <= 0) return acc;
-      const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
-      return acc + (val / itCoverage * batchCoverageUnits);
+      return acc + (isNaN(val) ? 0 : val);
     }, 0);
 
-    const shouldSyncTotal = !hasInitialGuess || nextBatchSum > (initialEstimate ?? 0);
+    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
     onChange({
       items: nextItems,
       ...(shouldSyncTotal
-        ? { totalSpent: nextBatchSum > 0 ? nextBatchSum.toFixed(2).replace(/\.00$/, '') : '' }
+        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
         : {}),
     });
   };
@@ -194,19 +190,17 @@ export function BucketCard({
       details: {},
     };
     const nextItems = [...bucket.items, newItem];
-    const nextBatchSum = nextItems.reduce((acc, it) => {
+    const nextSum = nextItems.reduce((acc, it) => {
       const val = parseFloat(it.amount);
-      if (isNaN(val) || val <= 0) return acc;
-      const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
-      return acc + (val / itCoverage * batchCoverageUnits);
+      return acc + (isNaN(val) ? 0 : val);
     }, 0);
 
-    const shouldSyncTotal = !hasInitialGuess || nextBatchSum > (initialEstimate ?? 0);
+    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
     onChange({
       items: nextItems,
       ...(shouldSyncTotal
-        ? { totalSpent: nextBatchSum > 0 ? nextBatchSum.toFixed(2).replace(/\.00$/, '') : '' }
+        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
         : {}),
     });
     setExpanded(true);
@@ -214,19 +208,17 @@ export function BucketCard({
 
   const removeItem = (id: string) => {
     const nextItems = bucket.items.filter((item) => item.id !== id);
-    const nextBatchSum = nextItems.reduce((acc, it) => {
+    const nextSum = nextItems.reduce((acc, it) => {
       const val = parseFloat(it.amount);
-      if (isNaN(val) || val <= 0) return acc;
-      const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
-      return acc + (val / itCoverage * batchCoverageUnits);
+      return acc + (isNaN(val) ? 0 : val);
     }, 0);
 
-    const shouldSyncTotal = !hasInitialGuess || nextBatchSum > (initialEstimate ?? 0);
+    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
     onChange({
       items: nextItems,
       ...(shouldSyncTotal
-        ? { totalSpent: nextBatchSum > 0 ? nextBatchSum.toFixed(2).replace(/\.00$/, '') : '' }
+        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
         : {}),
     });
   };
@@ -253,8 +245,7 @@ export function BucketCard({
   };
 
   const handleDiscardUnallocated = () => {
-    const actualSum = effectiveItemSum;
-    onChange({ totalSpent: actualSum > 0 ? actualSum.toFixed(2).replace(/\.00$/, '') : '' });
+    onChange({ totalSpent: itemSum > 0 ? itemSum.toFixed(2).replace(/\.00$/, '') : '' });
     setInitialEstimate(null);
   };
 
@@ -470,7 +461,7 @@ export function BucketCard({
                     <span className="text-muted-foreground/40">vs</span>
                     <span className="font-semibold text-muted-foreground">{t('itemizedActual')}:</span>
                     <span className="font-bold text-foreground bg-background px-2.5 py-1 rounded-md border border-border/70 shadow-2xs">
-                      {currencyCode} {effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      {currencyCode} {itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                     </span>
                     <span className="text-[11px] text-muted-foreground">
                       ({bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'})
@@ -491,13 +482,13 @@ export function BucketCard({
                 </div>
 
                 {/* Batch Cost Allocation note if item coverage differs from batch coverage */}
-                {Math.abs(rawItemSum - effectiveItemSum) > 0.01 && (
+                {Math.abs(itemSum - batchAllocatedItemSum) > 0.01 && (
                   <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 bg-muted/40 px-2.5 py-1 rounded-md border border-border/40">
                     <Scale className="size-3 text-primary shrink-0" />
                     <span>
                       {t('batchCostNote', {
-                        batchAmount: `${currencyCode} ${effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
-                        rawAmount: `${currencyCode} ${rawItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                        batchAmount: `${currencyCode} ${batchAllocatedItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                        rawAmount: `${currencyCode} ${itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
                       })}
                     </span>
                   </div>
@@ -505,7 +496,7 @@ export function BucketCard({
 
                 {/* Accuracy Insight Pill & Exceeded Dismissal */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60 text-xs">
-                  {effectiveItemSum === 0 ? (
+                  {itemSum === 0 ? (
                     <span className="text-muted-foreground text-xs">
                       {t('listItemsToCompareHint', { amount: `${currencyCode} ${initialEstimate.toLocaleString()}` })}
                     </span>
@@ -553,15 +544,21 @@ export function BucketCard({
                   <span className="text-xs font-semibold text-muted-foreground">
                     {t('itemSum')}:{' '}
                     <strong className="text-foreground font-bold">
-                      {currencyCode} {effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      {currencyCode} {itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                     </strong>
                   </span>
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                     {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'}
                   </span>
-                  {Math.abs(rawItemSum - effectiveItemSum) > 0.01 && (
-                    <span className="text-[10px] text-muted-foreground">
-                      ({currencyCode} {rawItemSum.toLocaleString()} cash outlay)
+                  {Math.abs(itemSum - batchAllocatedItemSum) > 0.01 && (
+                    <span
+                      className="text-[10px] text-muted-foreground bg-muted/60 px-2 py-0.5 rounded border border-border/40"
+                      title={t('batchCostNote', {
+                        batchAmount: `${currencyCode} ${batchAllocatedItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                        rawAmount: `${currencyCode} ${itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                      })}
+                    >
+                      ({currencyCode} {batchAllocatedItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} used for this production run)
                     </span>
                   )}
                 </div>
@@ -839,7 +836,7 @@ export function BucketCard({
             <span className="text-xs text-muted-foreground">
               {bucket.items.length > 0 && !expanded && (
                 <span>
-                  {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'} ({currencyCode} {effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                  {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'} ({currencyCode} {itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                 </span>
               )}
             </span>
