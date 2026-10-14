@@ -22,6 +22,7 @@ import {
   HelpCircle,
   Ban,
   Sparkles,
+  Scale,
 } from 'lucide-react';
 import { cn } from 'cn';
 import type { BucketDraft, LineItemDraft } from '@/store/useCalculatorStore';
@@ -129,21 +130,52 @@ export function BucketCard({
   };
   const CategoryIcon = theme.icon;
 
-  // Running sum of itemized costs in Level 2
-  const itemSum = bucket.items.reduce((acc, it) => {
+  // Level 1 batch coverage units (defaulting to monthlyUnits or defaultUnitsCovered or 1)
+  const batchCoverageUnits =
+    parseFloat(bucket.unitsCovered || monthlyUnits || defaultUnitsCovered || '1') || 1;
+
+  // Batch-allocated cost for all items: sum of ((amount / itemCoverage) * batchCoverageUnits)
+  const batchAllocatedItemSum = bucket.items.reduce((acc, it) => {
+    const val = parseFloat(it.amount);
+    if (isNaN(val) || val <= 0) return acc;
+    const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
+    return acc + (val / itCoverage * batchCoverageUnits);
+  }, 0);
+
+  // Raw cash outlay (sum of amounts entered)
+  const rawItemSum = bucket.items.reduce((acc, it) => {
     const val = parseFloat(it.amount);
     return acc + (isNaN(val) ? 0 : val);
   }, 0);
 
+  // Effective sum for reconciliation is the batch-allocated sum
+  const effectiveItemSum = batchAllocatedItemSum;
+
   const hasInitialGuess = initialEstimate !== null && initialEstimate > 0;
   const hasItems = bucket.items.length > 0;
 
+  const unallocatedCost = hasInitialGuess ? Math.max(0, initialEstimate - effectiveItemSum) : 0;
+  const exceededCost = hasInitialGuess ? Math.max(0, effectiveItemSum - initialEstimate) : 0;
+  const isExceeded = exceededCost > 0.01;
+  const isMatched =
+    hasInitialGuess && Math.abs(effectiveItemSum - initialEstimate) <= 0.01 && effectiveItemSum > 0;
+
   const updateItem = (id: string, updates: Partial<LineItemDraft>) => {
     const nextItems = bucket.items.map((item) => (item.id === id ? { ...item, ...updates } : item));
-    const nextSum = nextItems.reduce((acc, it) => acc + (parseFloat(it.amount) || 0), 0);
+    const nextBatchSum = nextItems.reduce((acc, it) => {
+      const val = parseFloat(it.amount);
+      if (isNaN(val) || val <= 0) return acc;
+      const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
+      return acc + (val / itCoverage * batchCoverageUnits);
+    }, 0);
+
+    const shouldSyncTotal = !hasInitialGuess || nextBatchSum > (initialEstimate ?? 0);
+
     onChange({
       items: nextItems,
-      ...(!hasInitialGuess ? { totalSpent: nextSum > 0 ? nextSum.toString() : '' } : {}),
+      ...(shouldSyncTotal
+        ? { totalSpent: nextBatchSum > 0 ? nextBatchSum.toFixed(2).replace(/\.00$/, '') : '' }
+        : {}),
     });
   };
 
@@ -157,28 +189,76 @@ export function BucketCard({
       name: '',
       amount: '',
       unitsCovered: bucket.unitsCovered || monthlyUnits || defaultUnitsCovered || '',
+      purchaseQuantity: '1',
+      purchaseUnit: '',
       details: {},
     };
     const nextItems = [...bucket.items, newItem];
-    const nextSum = nextItems.reduce((acc, it) => acc + (parseFloat(it.amount) || 0), 0);
+    const nextBatchSum = nextItems.reduce((acc, it) => {
+      const val = parseFloat(it.amount);
+      if (isNaN(val) || val <= 0) return acc;
+      const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
+      return acc + (val / itCoverage * batchCoverageUnits);
+    }, 0);
+
+    const shouldSyncTotal = !hasInitialGuess || nextBatchSum > (initialEstimate ?? 0);
+
     onChange({
       items: nextItems,
-      ...(!hasInitialGuess ? { totalSpent: nextSum > 0 ? nextSum.toString() : '' } : {}),
+      ...(shouldSyncTotal
+        ? { totalSpent: nextBatchSum > 0 ? nextBatchSum.toFixed(2).replace(/\.00$/, '') : '' }
+        : {}),
     });
     setExpanded(true);
   };
 
   const removeItem = (id: string) => {
     const nextItems = bucket.items.filter((item) => item.id !== id);
-    const nextSum = nextItems.reduce((acc, it) => acc + (parseFloat(it.amount) || 0), 0);
+    const nextBatchSum = nextItems.reduce((acc, it) => {
+      const val = parseFloat(it.amount);
+      if (isNaN(val) || val <= 0) return acc;
+      const itCoverage = parseFloat(it.unitsCovered) || batchCoverageUnits;
+      return acc + (val / itCoverage * batchCoverageUnits);
+    }, 0);
+
+    const shouldSyncTotal = !hasInitialGuess || nextBatchSum > (initialEstimate ?? 0);
+
     onChange({
       items: nextItems,
-      ...(!hasInitialGuess ? { totalSpent: nextSum > 0 ? nextSum.toString() : '' } : {}),
+      ...(shouldSyncTotal
+        ? { totalSpent: nextBatchSum > 0 ? nextBatchSum.toFixed(2).replace(/\.00$/, '') : '' }
+        : {}),
     });
   };
 
-  const handleAdoptActualTotal = () => {
-    onChange({ totalSpent: itemSum > 0 ? itemSum.toString() : '' });
+  const handleConvertUnallocatedToItem = () => {
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const unallocatedItem: LineItemDraft = {
+      id,
+      name: '',
+      amount: unallocatedCost.toFixed(2).replace(/\.00$/, ''),
+      unitsCovered: bucket.unitsCovered || monthlyUnits || defaultUnitsCovered || '',
+      purchaseQuantity: '1',
+      purchaseUnit: '',
+      details: {},
+    };
+    const nextItems = [...bucket.items, unallocatedItem];
+    onChange({
+      items: nextItems,
+      totalSpent: initialEstimate ? initialEstimate.toString() : bucket.totalSpent,
+    });
+  };
+
+  const handleDiscardUnallocated = () => {
+    const actualSum = effectiveItemSum;
+    onChange({ totalSpent: actualSum > 0 ? actualSum.toFixed(2).replace(/\.00$/, '') : '' });
+    setInitialEstimate(null);
+  };
+
+  const handleAcknowledgeExceeded = () => {
     setInitialEstimate(null);
   };
 
@@ -390,7 +470,7 @@ export function BucketCard({
                     <span className="text-muted-foreground/40">vs</span>
                     <span className="font-semibold text-muted-foreground">{t('itemizedActual')}:</span>
                     <span className="font-bold text-foreground bg-background px-2.5 py-1 rounded-md border border-border/70 shadow-2xs">
-                      {currencyCode} {itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      {currencyCode} {effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                     </span>
                     <span className="text-[11px] text-muted-foreground">
                       ({bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'})
@@ -410,56 +490,61 @@ export function BucketCard({
                   </Button>
                 </div>
 
-                {/* Accuracy Insight Pill & Adopt Action */}
+                {/* Batch Cost Allocation note if item coverage differs from batch coverage */}
+                {Math.abs(rawItemSum - effectiveItemSum) > 0.01 && (
+                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 bg-muted/40 px-2.5 py-1 rounded-md border border-border/40">
+                    <Scale className="size-3 text-primary shrink-0" />
+                    <span>
+                      {t('batchCostNote', {
+                        batchAmount: `${currencyCode} ${effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                        rawAmount: `${currencyCode} ${rawItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                      })}
+                    </span>
+                  </div>
+                )}
+
+                {/* Accuracy Insight Pill & Exceeded Dismissal */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60 text-xs">
-                  {itemSum === 0 ? (
+                  {effectiveItemSum === 0 ? (
                     <span className="text-muted-foreground text-xs">
                       {t('listItemsToCompareHint', { amount: `${currencyCode} ${initialEstimate.toLocaleString()}` })}
                     </span>
-                  ) : itemSum > initialEstimate ? (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                        ⚠️ {t('underestimatedNotice', {
-                          amount: `${currencyCode} ${(itemSum - initialEstimate).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
-                          percent: Math.round(((itemSum - initialEstimate) / initialEstimate) * 100),
+                  ) : isExceeded ? (
+                    <div className="flex items-center justify-between gap-2 w-full flex-wrap">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                        ⚠️ {t('exceededBadge', {
+                          amount: `${currencyCode} ${exceededCost.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                          percent: Math.round((exceededCost / initialEstimate) * 100),
                         })}
                       </span>
-                      <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                        {t('actualHigherMessage')}
-                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                        onClick={handleAcknowledgeExceeded}
+                        title={t('dismissComparison')}
+                      >
+                        {t('dismissComparison')}
+                      </Button>
                     </div>
-                  ) : itemSum < initialEstimate ? (
-                    <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
-                      ℹ️ {t('overestimatedNotice', {
-                        amount: `${currencyCode} ${(initialEstimate - itemSum).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
-                      })}
-                    </span>
-                  ) : (
+                  ) : isMatched ? (
                     <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                       ✓ {t('perfectEstimateNotice')}
                     </span>
-                  )}
-
-                  {/* 1-Click Adopt Actual Total */}
-                  {itemSum > 0 && Math.abs(itemSum - initialEstimate) > 0.01 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2.5 text-xs font-medium border-primary/30 hover:bg-primary/10 hover:text-primary transition-all shadow-2xs"
-                      onClick={handleAdoptActualTotal}
-                      title={t('adoptActualTotal', { amount: `${currencyCode} ${itemSum.toLocaleString()}` })}
-                    >
-                      <RefreshCw className="mr-1.5 size-3 text-primary" />
-                      <span>{t('adoptActualTotal', { amount: `${currencyCode} ${itemSum.toLocaleString()}` })}</span>
-                    </Button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
+                      ℹ️ {t('overestimatedNotice', {
+                        amount: `${currencyCode} ${unallocatedCost.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                      })}
+                    </span>
                   )}
                 </div>
               </div>
             ) : (
               /* Dedicated User (Started in Level 2 directly): Clean, Compact Itemized Header */
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border/70 bg-muted/20 px-3.5 py-2.5">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Layers className="size-4 text-primary shrink-0" />
                   <span className="text-xs font-bold text-foreground">
                     {t('itemsBreakdownHeading')}
@@ -468,12 +553,17 @@ export function BucketCard({
                   <span className="text-xs font-semibold text-muted-foreground">
                     {t('itemSum')}:{' '}
                     <strong className="text-foreground font-bold">
-                      {currencyCode} {itemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                      {currencyCode} {effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                     </strong>
                   </span>
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                     {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'}
                   </span>
+                  {Math.abs(rawItemSum - effectiveItemSum) > 0.01 && (
+                    <span className="text-[10px] text-muted-foreground">
+                      ({currencyCode} {rawItemSum.toLocaleString()} cash outlay)
+                    </span>
+                  )}
                 </div>
 
                 <Button
@@ -681,6 +771,55 @@ export function BucketCard({
                 })}
               </div>
 
+              {/* Special Interactive Unallocated Balance Row */}
+              {hasInitialGuess && unallocatedCost > 0.01 && (
+                <div className="rounded-xl border border-dashed border-primary/35 bg-gradient-to-r from-primary/5 via-primary/[0.08] to-transparent p-3 sm:p-3.5 flex flex-wrap items-center justify-between gap-3 transition-all hover:border-primary/50">
+                  <div className="flex items-center gap-2.5">
+                    <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                      <Scale className="size-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-foreground">
+                          {t('unallocatedBalanceTitle')}
+                        </span>
+                        <span className="font-bold text-xs text-primary bg-background px-2 py-0.5 rounded border border-primary/25 shadow-2xs">
+                          {currencyCode} {unallocatedCost.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {t('unallocatedBalanceDesc', { initial: `${currencyCode} ${initialEstimate.toLocaleString()}` })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs font-semibold bg-background hover:bg-primary hover:text-primary-foreground border-primary/40 shadow-2xs gap-1.5"
+                      onClick={handleConvertUnallocatedToItem}
+                    >
+                      <Plus className="size-3.5" />
+                      <span>{t('convertUnallocatedAction')}</span>
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1.5"
+                      onClick={handleDiscardUnallocated}
+                      title={t('discardUnallocatedAction')}
+                    >
+                      <Trash2 className="size-3.5" />
+                      <span>{t('discardUnallocatedAction')}</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {/* Add Item Button */}
               <Button
                 type="button"
@@ -700,7 +839,7 @@ export function BucketCard({
             <span className="text-xs text-muted-foreground">
               {bucket.items.length > 0 && !expanded && (
                 <span>
-                  {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'} ({currencyCode} {itemSum.toLocaleString()})
+                  {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'} ({currencyCode} {effectiveItemSum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                 </span>
               )}
             </span>
