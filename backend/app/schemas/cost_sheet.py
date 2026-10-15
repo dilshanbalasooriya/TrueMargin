@@ -73,8 +73,12 @@ class SheetVersionDetailResponse(SheetVersionSummary):
     cash_unit_cost: Decimal = Decimal("0")
     economic_unit_cost: Decimal = Decimal("0")
     cost_view: Literal["cash", "economic"] = "economic"
+    seller_paid_delivery_per_unit: Decimal = Decimal("0")
+    customer_paid_delivery_per_unit: Decimal = Decimal("0")
     default_units_covered_scope: Literal["all", "overhead_only"] = "all"
     suggested_price: Decimal
+    suggested_product_price: Decimal = Decimal("0")
+    suggested_delivered_price: Decimal = Decimal("0")
     profit_per_unit: Decimal
     total_expected_profit: Decimal
     equivalent_markup_or_margin: Decimal

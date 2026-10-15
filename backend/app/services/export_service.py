@@ -58,11 +58,14 @@ class ExportService:
         writer.writerow(["Economic Total Cost", str(snap.get("economic_total_cost", snap.get("total_cost", 0)))])
         writer.writerow(["Cash Unit Cost", str(snap.get("cash_unit_cost", snap.get("unit_cost", 0)))])
         writer.writerow(["Economic Unit Cost", str(snap.get("economic_unit_cost", snap.get("unit_cost", 0)))])
+        writer.writerow(["Seller-Paid Delivery per Unit", str(snap.get("seller_paid_delivery_per_unit", 0))])
+        writer.writerow(["Customer-Paid Delivery per Unit", str(snap.get("customer_paid_delivery_per_unit", 0))])
         writer.writerow(["Pricing Type", snap.get("pricing_type", "markup")])
         writer.writerow(["Pricing Percentage", f"{snap.get('pricing_percentage', 0)}%"])
         target_price = snap.get("target_selling_price")
         writer.writerow(["Target Selling Price", str(target_price if target_price is not None else "N/A")])
-        writer.writerow(["Suggested Selling Price", str(snap.get("suggested_price", "0.0000"))])
+        writer.writerow(["Suggested Product Price", str(snap.get("suggested_product_price", snap.get("suggested_price", "0.0000")))])
+        writer.writerow(["Suggested Delivered Price", str(snap.get("suggested_delivered_price", snap.get("suggested_price", "0.0000")))])
         writer.writerow(["Profit Per Unit", str(snap.get("profit_per_unit", "0.0000"))])
         break_even_units = snap.get("break_even_units")
         break_even_status = (
@@ -236,7 +239,10 @@ class ExportService:
                     <div class="summary-item"><label>Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('unit_cost'))}</value></div>
                     <div class="summary-item"><label>Cash Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('cash_unit_cost', snap.get('unit_cost')))}</value></div>
                     <div class="summary-item"><label>Economic Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('economic_unit_cost', snap.get('unit_cost')))}</value></div>
-                    <div class="summary-item"><label>Suggested Selling Price</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('suggested_price'))}</value></div>
+                    <div class="summary-item"><label>Seller-Paid Delivery / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('seller_paid_delivery_per_unit', 0))}</value></div>
+                    <div class="summary-item"><label>Customer-Paid Delivery / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('customer_paid_delivery_per_unit', 0))}</value></div>
+                    <div class="summary-item"><label>Suggested Product Price</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('suggested_product_price', snap.get('suggested_price')))}</value></div>
+                    <div class="summary-item"><label>Suggested Delivered Price</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('suggested_delivered_price', snap.get('suggested_price')))}</value></div>
                     <div class="summary-item"><label>Profit / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('profit_per_unit'))}</value></div>
                     <div class="summary-item"><label>Break-even Units</label><value>{self._html_text(snap.get('break_even_units') if snap.get('break_even_units') is not None else 'Not reached' if snap.get('break_even_ready', False) else 'Level 3 cost split incomplete')}</value></div>
                 </div>

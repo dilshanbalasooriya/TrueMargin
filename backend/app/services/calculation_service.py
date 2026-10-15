@@ -1,4 +1,5 @@
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
+import json
 from typing import List, Tuple
 
 from app.schemas.calculation import (
@@ -25,17 +26,148 @@ def calculate_cost_sheet(request: CalculationRequest) -> CalculationResponse:
     buckets: List[BucketBreakdownOutput] = []
     cash_total = economic_total = cash_unit = economic_unit = ZERO
     cash_fixed = economic_fixed = ZERO
+    seller_delivery_cash_unit = seller_delivery_economic_unit = ZERO
+    customer_delivery_cash_unit = customer_delivery_economic_unit = ZERO
     break_even_ready = True
     has_costs = False
+
+    material_values = {}
+    for material_bucket in request.buckets:
+        if material_bucket.hidden or material_bucket.type.strip().casefold() != "material":
+            continue
+        for material_item in material_bucket.items:
+            source_id = material_item.details.get("source_item_id")
+            if not isinstance(source_id, str) or not source_id:
+                continue
+            covered = (
+                material_item.units_covered
+                if material_item.units_covered and material_item.units_covered > ZERO
+                else good_units
+            )
+            material_values[source_id] = (
+                material_item.name,
+                _calculate_line_amount(material_item, covered),
+            )
 
     for bucket in request.buckets:
         if bucket.hidden:
             continue
-        result, bucket_cash, bucket_economic = _process_bucket(
-            bucket,
-            good_units,
-            request.default_units_covered_scope,
-        )
+        if bucket.type.strip().casefold() == "transport":
+            allocated_items = []
+            all_material_ids = list(material_values)
+            for item in bucket.items:
+                if item.details.get("direction") == "outbound" or not material_values:
+                    allocated_items.append(item)
+                    continue
+                details = dict(item.details)
+                requested_ids = [
+                    value
+                    for value in str(details.get("allocated_material_ids", "")).split(",")
+                    if value in material_values
+                ]
+                selected_ids = requested_ids or all_material_ids
+                details["allocated_material_ids"] = (
+                    ",".join(requested_ids) if requested_ids else ""
+                )
+                total_material_value = sum(
+                    (material_values[source_id][1] for source_id in selected_ids),
+                    ZERO,
+                )
+                if total_material_value > ZERO:
+                    covered = (
+                        item.units_covered
+                        if item.units_covered and item.units_covered > ZERO
+                        else (
+                            bucket.units_covered
+                            if bucket.units_covered and bucket.units_covered > ZERO
+                            else good_units
+                        )
+                    )
+                    transport_amount = _calculate_line_amount(item, covered)
+                    allocations = [
+                        {
+                            "material_id": source_id,
+                            "material_name": material_values[source_id][0],
+                            "share": str(
+                                _round_num(
+                                    material_values[source_id][1]
+                                    / total_material_value
+                                    * HUNDRED
+                                )
+                            ),
+                            "amount": str(
+                                _round_num(
+                                    transport_amount
+                                    * material_values[source_id][1]
+                                    / total_material_value
+                                )
+                            ),
+                        }
+                        for source_id in selected_ids
+                    ]
+                    details["material_allocations"] = json.dumps(
+                        allocations, ensure_ascii=False, sort_keys=True
+                    )
+                allocated_items.append(item.model_copy(update={"details": details}))
+            bucket = bucket.model_copy(update={"items": allocated_items})
+
+        delivery_results = []
+        outbound_items = [
+            item
+            for item in bucket.items
+            if bucket.type.strip().casefold() == "transport"
+            and item.details.get("direction") == "outbound"
+        ]
+        if outbound_items:
+            production_items = [item for item in bucket.items if item not in outbound_items]
+            production_bucket = bucket.model_copy(
+                update={"items": production_items, "declared_total": ZERO}
+            )
+            result, bucket_cash, bucket_economic = _process_bucket(
+                production_bucket,
+                good_units,
+                request.default_units_covered_scope,
+            )
+            seller_items = [
+                item
+                for item in outbound_items
+                if item.details.get("delivery_treatment", "seller_paid") == "seller_paid"
+            ]
+            customer_items = [
+                item
+                for item in outbound_items
+                if item.details.get("delivery_treatment", "seller_paid") == "customer_paid"
+            ]
+            for items, treatment in (
+                (seller_items, "seller"),
+                (customer_items, "customer"),
+            ):
+                if not items:
+                    continue
+                delivery_bucket = bucket.model_copy(
+                    update={"items": items, "declared_total": ZERO}
+                )
+                delivery_result, _, _ = _process_bucket(
+                    delivery_bucket,
+                    good_units,
+                    request.default_units_covered_scope,
+                )
+                delivery_results.append((delivery_result, treatment))
+                if treatment == "seller":
+                    seller_delivery_cash_unit += delivery_result.cash_cost_per_unit
+                    seller_delivery_economic_unit += delivery_result.economic_cost_per_unit
+                    cash_fixed += delivery_result.fixed_cash_total
+                    economic_fixed += delivery_result.fixed_economic_total
+                else:
+                    customer_delivery_cash_unit += delivery_result.cash_cost_per_unit
+                    customer_delivery_economic_unit += delivery_result.economic_cost_per_unit
+        else:
+            result, bucket_cash, bucket_economic = _process_bucket(
+                bucket,
+                good_units,
+                request.default_units_covered_scope,
+            )
+
         buckets.append(result)
         cash_total += bucket_cash
         economic_total += bucket_economic
@@ -69,10 +201,47 @@ def calculate_cost_sheet(request: CalculationRequest) -> CalculationResponse:
                 or unallocated_amount > ZERO
             ):
                 break_even_ready = False
+        for delivery_result, treatment in delivery_results:
+            if treatment == "customer":
+                result.items.extend(delivery_result.items)
+                continue
+            delivery_cost = (
+                delivery_result.cash_cost_per_unit
+                if request.cost_view == "cash"
+                else delivery_result.economic_cost_per_unit
+            )
+            if delivery_cost <= ZERO:
+                continue
+            has_costs = True
+            delivery_items = [
+                item
+                for item in delivery_result.items
+                if item.kind != "system_unallocated"
+            ]
+            if (
+                delivery_result.reconciliation_status == "unallocated_added"
+                or bucket.level < 3
+                or any(
+                    item.amount > ZERO and "variable_percentage" not in item.details
+                    for item in delivery_items
+                )
+            ):
+                break_even_ready = False
+            result.items.extend(delivery_result.items)
 
     view = request.cost_view
     total_cost = cash_total if view == "cash" else economic_total
     unit_cost = cash_unit if view == "cash" else economic_unit
+    seller_delivery_per_unit = (
+        seller_delivery_cash_unit
+        if view == "cash"
+        else seller_delivery_economic_unit
+    )
+    customer_delivery_per_unit = (
+        customer_delivery_cash_unit
+        if view == "cash"
+        else customer_delivery_economic_unit
+    )
     for bucket in buckets:
         bucket_cost = bucket.cash_cost_per_unit if view == "cash" else bucket.economic_cost_per_unit
         bucket.percentage_of_total = (
@@ -87,27 +256,43 @@ def calculate_cost_sheet(request: CalculationRequest) -> CalculationResponse:
 
     pricing_type = request.pricing_type.lower()
     percentage = request.pricing_percentage
+    delivered_cost_per_unit = unit_cost + seller_delivery_per_unit
     if request.target_selling_price is not None:
-        price = request.target_selling_price
-        profit = price - unit_cost
+        product_price = request.target_selling_price
+        seller_included_product_price = request.target_selling_price
         if pricing_type == "margin":
-            equivalent = profit / price * HUNDRED if price > ZERO else ZERO
+            equivalent = (
+                (seller_included_product_price - delivered_cost_per_unit)
+                / seller_included_product_price
+                * HUNDRED
+                if seller_included_product_price > ZERO
+                else ZERO
+            )
         else:
-            equivalent = profit / unit_cost * HUNDRED if unit_cost > ZERO else ZERO
+            equivalent = (
+                (seller_included_product_price - delivered_cost_per_unit)
+                / delivered_cost_per_unit
+                * HUNDRED
+                if delivered_cost_per_unit > ZERO
+                else ZERO
+            )
     elif pricing_type == "margin":
         margin = percentage / HUNDRED
-        price = unit_cost / (Decimal("1") - margin)
+        product_price = unit_cost / (Decimal("1") - margin)
+        seller_included_product_price = delivered_cost_per_unit / (Decimal("1") - margin)
         equivalent = percentage / (HUNDRED - percentage) * HUNDRED
     else:
         markup = percentage / HUNDRED
-        price = unit_cost * (Decimal("1") + markup)
+        product_price = unit_cost * (Decimal("1") + markup)
+        seller_included_product_price = delivered_cost_per_unit * (Decimal("1") + markup)
         equivalent = percentage / (HUNDRED + percentage) * HUNDRED
 
-    profit_per_unit = price - unit_cost
+    delivered_price = seller_included_product_price + customer_delivery_per_unit
+    profit_per_unit = seller_included_product_price - delivered_cost_per_unit
     fixed_total = cash_fixed if view == "cash" else economic_fixed
     fixed_per_unit = fixed_total / good_units
-    variable_unit_cost = max(unit_cost - fixed_per_unit, ZERO)
-    contribution = price - variable_unit_cost
+    variable_unit_cost = max(delivered_cost_per_unit - fixed_per_unit, ZERO)
+    contribution = seller_included_product_price - variable_unit_cost
     break_even = (
         None
         if not has_costs or not break_even_ready or contribution <= ZERO
@@ -129,6 +314,8 @@ def calculate_cost_sheet(request: CalculationRequest) -> CalculationResponse:
         cash_unit_cost=_round_num(cash_unit),
         economic_unit_cost=_round_num(economic_unit),
         cost_view=view,
+        seller_paid_delivery_per_unit=_round_num(seller_delivery_per_unit),
+        customer_paid_delivery_per_unit=_round_num(customer_delivery_per_unit),
         pricing_type=pricing_type,
         pricing_percentage=_round_num(percentage),
         target_selling_price=(
@@ -136,13 +323,15 @@ def calculate_cost_sheet(request: CalculationRequest) -> CalculationResponse:
             if request.target_selling_price is not None
             else None
         ),
-        suggested_price=_round_num(price),
+        suggested_price=_round_num(delivered_price),
+        suggested_product_price=_round_num(product_price),
+        suggested_delivered_price=_round_num(delivered_price),
         profit_per_unit=_round_num(profit_per_unit),
         total_expected_profit=_round_num(profit_per_unit * good_units),
         equivalent_markup_or_margin=_round_num(equivalent),
         break_even_units=break_even,
         break_even_ready=has_costs and break_even_ready,
-        is_loss_making=price < unit_cost,
+        is_loss_making=profit_per_unit < ZERO,
         bucket_breakdown=buckets,
     )
 

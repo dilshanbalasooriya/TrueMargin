@@ -37,11 +37,6 @@ export function getActiveLevel3Count(item: LineItemDraft, bucketKey: string): nu
       if (item.details.statutory_percentage?.trim()) count++;
       if (item.details.bonus_percentage?.trim()) count++;
       if (item.details.allocation_percentage?.trim() && item.details.allocation_percentage.trim() !== '100') count++;
-    } else if (bucketKey === 'transport') {
-      if (item.details.direction && item.details.direction !== 'shared') count++;
-      if (item.details.allocation_basis && item.details.allocation_basis !== 'quantity') count++;
-      if (item.details.allocation_measure?.trim()) count++;
-      if (item.details.allocation_total_measure?.trim()) count++;
     } else if (bucketKey === 'overhead') {
       if (item.details.allocation_percentage?.trim()) count++;
     } else if (bucketKey === 'machinery') {
@@ -244,46 +239,6 @@ function Level3Form({
                   </div>
                 </label>
               </div>
-            </div>
-          </div>
-        )}
-
-        {bucketKey === 'transport' && (
-          <div className="space-y-3.5 rounded-xl border border-border/80 bg-muted/20 p-4">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {t('categorySpecificSectionTitle')}
-            </h4>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <DetailSelect
-                id={`${prefix}-direction`}
-                label={t('detailLabels.direction')}
-                value={details.direction ?? 'shared'}
-                options={['inbound', 'outbound', 'shared']}
-                optionLabel={(value) => t(`detailOptions.${value}`)}
-                onChange={(value) => updateDetail('direction', value)}
-              />
-              <DetailSelect
-                id={`${prefix}-allocation-basis`}
-                label={t('detailLabels.allocation_basis')}
-                value={details.allocation_basis ?? 'quantity'}
-                options={['quantity', 'weight', 'volume']}
-                optionLabel={(value) => t(`detailOptions.${value}`)}
-                onChange={(value) => updateDetail('allocation_basis', value)}
-              />
-              <DetailNumberInput
-                id={`${prefix}-allocation-measure`}
-                label={t('detailLabels.allocation_measure')}
-                value={details.allocation_measure ?? ''}
-                onChange={(value) => updateDetail('allocation_measure', value)}
-                placeholder="e.g. 20"
-              />
-              <DetailNumberInput
-                id={`${prefix}-allocation-total`}
-                label={t('detailLabels.allocation_total_measure')}
-                value={details.allocation_total_measure ?? ''}
-                onChange={(value) => updateDetail('allocation_total_measure', value)}
-                placeholder="e.g. 100"
-              />
             </div>
           </div>
         )}

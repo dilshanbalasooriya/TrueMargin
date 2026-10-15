@@ -2,6 +2,7 @@ import { Noto_Sans_Sinhala, Plus_Jakarta_Sans } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
+import Script from 'next/script';
 import { routing } from '@/i18n/routing';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import { ThemeProvider } from '@/components/app/ThemeProvider';
@@ -58,11 +59,9 @@ export default async function LocaleLayout({
     <html lang={locale} suppressHydrationWarning className={`${plusJakartaSans.variable} ${notoSansSinhala.variable} h-full antialiased bg-background text-foreground`}>
       <head>
         <meta name="darkreader-lock" content="" />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var el=document.documentElement;if(d){el.classList.add('dark');el.style.colorScheme='dark';}else{el.classList.remove('dark');el.style.colorScheme='light';}}catch(e){}})();`,
-          }}
-        />
+        <Script id="theme-initialization" strategy="beforeInteractive">
+          {`(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);var el=document.documentElement;if(d){el.classList.add('dark');el.style.colorScheme='dark';}else{el.classList.remove('dark');el.style.colorScheme='light';}}catch(e){}})();`}
+        </Script>
       </head>
       <body className="min-h-full flex flex-col font-sans bg-background text-foreground" suppressHydrationWarning>
         <ThemeProvider>

@@ -18,6 +18,7 @@ export function PricingControls({ pricingType, percentage, onChange }: PricingCo
       <div>
         <h2 id="pricing-heading" className="text-lg font-semibold tracking-tight">{t('pricingTitle')}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{t('pricingDescription')}</p>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">{t('pricingDeliveryHint')}</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-[1fr_12rem] sm:items-end">

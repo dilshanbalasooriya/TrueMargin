@@ -116,6 +116,13 @@ function isValidDraft(draft: GuestDraft, locale: string): boolean {
         }
 
         const details = item.details ?? {};
+        if (
+          key === 'transport'
+          && details.direction === 'outbound'
+          && !['seller_paid', 'customer_paid'].includes(
+            details.delivery_treatment ?? 'seller_paid',
+          )
+        ) return false;
         const allocationMeasure = details.allocation_measure?.trim();
         const allocationTotal = details.allocation_total_measure?.trim();
         if (Boolean(allocationMeasure) !== Boolean(allocationTotal)) return false;
@@ -592,6 +599,13 @@ export function CalculatorPage() {
                       }
                       monthlyUnits={draft.unitsProduced}
                       unitLabel={draft.unitLabel}
+                      relatedMaterials={
+                        key === 'transport'
+                          ? (draft.buckets.material?.items ?? [])
+                            .filter((item) => item.name.trim())
+                            .map(({ id, name }) => ({ id, name }))
+                          : []
+                      }
                       isExpanded={expandedBucketKey === key}
                       onToggleExpand={(expanded) => setExpandedBucketKey(expanded ? key : null)}
                       onChange={(updates) => changeBucket(key, updates)}

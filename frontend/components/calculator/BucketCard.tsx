@@ -28,6 +28,7 @@ import {
 import { cn } from 'cn';
 import type { BucketDraft, LineItemDraft } from '@/store/useCalculatorStore';
 import { Level3DetailsModal, getActiveLevel3Count } from './Level3DetailsModal';
+import { TransportCostEditor } from './TransportCostEditor';
 import {
   calculateRecipeCoverageClient,
   areUnitsCompatible,
@@ -44,6 +45,7 @@ interface BucketCardProps {
   defaultUnitsCovered?: string;
   monthlyUnits?: string;
   unitLabel?: string;
+  relatedMaterials?: Array<Pick<LineItemDraft, 'id' | 'name'>>;
   onChange: (updates: Partial<BucketDraft>) => void;
   isExpanded?: boolean;
   onToggleExpand?: (expand: boolean) => void;
@@ -174,6 +176,7 @@ export function BucketCard({
   defaultUnitsCovered,
   monthlyUnits,
   unitLabel,
+  relatedMaterials = [],
   onChange,
   isExpanded: isExpandedProp,
   onToggleExpand,
@@ -189,7 +192,7 @@ export function BucketCard({
       if (bucket.items.length === 0) {
         setIsLevel2(false);
         setActiveItemId(null);
-      } else {
+      } else if (bucket.items.length > 0) {
         setIsLevel2(true);
       }
     }
@@ -206,6 +209,14 @@ export function BucketCard({
 
   const isLabor = bucketKey === 'labor';
   const isOverhead = bucketKey === 'overhead';
+  const isTransport = bucketKey === 'transport';
+  const availableOverheadPresets = OVERHEAD_PRESETS.filter(
+    (preset) => !bucket.items.some(
+      (item) =>
+        item.details?.overhead_preset_id === preset.id
+        || item.name.trim() === t(preset.nameKey),
+    ),
+  );
 
   // Category Default Method (Recipe vs Total Items Made for materials/other)
   const [categoryDefaultMethod, setCategoryDefaultMethod] = useState<'recipe' | 'total'>(() => {
@@ -244,7 +255,7 @@ export function BucketCard({
       setInitialEstimate(null);
     }
     prevItemsLength.current = bucket.items.length;
-  }, [bucket.items.length]);
+  }, [bucket.items.length, bucketKey]);
 
   // Clean up activeItemId if the active item was removed
   useEffect(() => {
@@ -303,7 +314,6 @@ export function BucketCard({
   const effectiveUnitCost = effectiveCoverage > 0 && effectiveSpent > 0
     ? (effectiveSpent / effectiveCoverage)
     : 0;
-
   const updateItem = (id: string, updates: Partial<LineItemDraft>) => {
     const nextItems = bucket.items.map((item) => (item.id === id ? { ...item, ...updates } : item));
     const nextSum = nextItems.reduce((acc, it) => {
@@ -336,6 +346,7 @@ export function BucketCard({
       purchaseUnit: 'mo',
       isImputed: false,
       details: {
+        overhead_preset_id: preset.id,
         overhead_mode: 'business',
         monthly_bill: '',
         allocation_percentage: '100',
@@ -355,6 +366,73 @@ export function BucketCard({
     setCardExpanded(true);
     setIsLevel2(true);
     setActiveItemId(id);
+  };
+
+  const handleAddIncomingTransportItem = (material: Pick<LineItemDraft, 'id' | 'name'>) => {
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const batchUnits = bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '';
+    const item: LineItemDraft = {
+      id,
+      name: t('transportIncomingChargeName', { material: material.name }),
+      amount: '',
+      unitsCovered: batchUnits,
+      isImputed: false,
+      details: {
+        direction: 'inbound',
+        allocated_material_ids: material.id,
+        cost_behavior: 'variable',
+        variable_percentage: '100',
+      },
+    };
+    const nextItems = [...bucket.items, item];
+    const nextSum = nextItems.reduce((acc, current) => acc + getItemEffectiveAmount(current), 0);
+    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+
+    onChange({
+      items: nextItems,
+      ...(shouldSyncTotal
+        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+        : {}),
+    });
+    setCardExpanded(true);
+    setIsLevel2(true);
+  };
+
+  const handleAddOutgoingTransportItem = (name = '', presetId?: string) => {
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const batchUnits = bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '';
+    const item: LineItemDraft = {
+      id,
+      name,
+      amount: '',
+      unitsCovered: batchUnits,
+      isImputed: false,
+      details: {
+        direction: 'outbound',
+        delivery_treatment: 'seller_paid',
+        ...(presetId ? { transport_preset_id: presetId } : {}),
+        cost_behavior: 'variable',
+        variable_percentage: '100',
+      },
+    };
+    const nextItems = [...bucket.items, item];
+    const nextSum = nextItems.reduce((acc, current) => acc + getItemEffectiveAmount(current), 0);
+    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+
+    onChange({
+      items: nextItems,
+      ...(shouldSyncTotal
+        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+        : {}),
+    });
+    setCardExpanded(true);
+    setIsLevel2(true);
   };
 
   const handleAddNewOverheadItem = () => {
@@ -1049,7 +1127,7 @@ export function BucketCard({
             /* LEVEL 2 VIEW: Redesigned, Orderly Itemized Section */
             <div className="mt-4 space-y-4 pt-2 border-t border-border/60">
               {/* Estimation Reality Check Banner (Level 1 vs Level 2) */}
-              {hasInitialGuess && (
+              {hasInitialGuess && !isTransport && (
                 <div className="rounded-xl border border-border/80 bg-gradient-to-br from-card to-muted/30 p-3 sm:p-3.5 space-y-2.5 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -1117,7 +1195,7 @@ export function BucketCard({
               )}
 
               {/* First-Time Category Method Question Prompt (Dismissed once answered) */}
-              {bucket.items.length === 0 && (
+              {bucket.items.length === 0 && !isTransport && (
                 isOverhead ? (
                   <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/5 via-card to-background p-4 sm:p-5 space-y-3.5 shadow-2xs animate-in fade-in">
                     <div className="flex items-center gap-2">
@@ -1135,7 +1213,7 @@ export function BucketCard({
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 pt-1">
-                      {OVERHEAD_PRESETS.map((preset) => (
+                      {availableOverheadPresets.map((preset) => (
                         <button
                           key={preset.id}
                           type="button"
@@ -1301,13 +1379,25 @@ export function BucketCard({
                 )
               )}
 
+              {isTransport && (
+                <TransportCostEditor
+                  items={bucket.items}
+                  materials={relatedMaterials}
+                  currencyCode={currencyCode}
+                  onAddIncoming={handleAddIncomingTransportItem}
+                  onAddOutgoing={handleAddOutgoingTransportItem}
+                  onUpdate={updateItem}
+                  onRemove={removeItem}
+                />
+              )}
+
               {/* Quick Preset Chips for Overhead when items already exist */}
-              {isOverhead && bucket.items.length > 0 && (
+              {isOverhead && bucket.items.length > 0 && availableOverheadPresets.length > 0 && (
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                   <span className="text-[11px] font-bold text-muted-foreground shrink-0 uppercase tracking-wider">
                     {t('overheadQuickAddTitle')}:
                   </span>
-                  {OVERHEAD_PRESETS.map((preset) => (
+                  {availableOverheadPresets.map((preset) => (
                     <button
                       key={preset.id}
                       type="button"
@@ -1324,7 +1414,8 @@ export function BucketCard({
 
               {/* Guided Item Cards with Accordion/Compact Behavior */}
               <div className="space-y-3">
-                {bucket.items.map((item, index) => {
+                {(isTransport ? [] : bucket.items).map((item) => {
+                  const index = bucket.items.indexOf(item);
                   const activeLevel3Count = getActiveLevel3Count(item, bucketKey);
                   const isItemExpanded = activeItemId === item.id;
                   const isRecipe = item.details?.method === 'recipe';
@@ -1991,7 +2082,7 @@ export function BucketCard({
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                               {/* Time Rate Input + Unit Switcher */}
                               <div>
-                                <div className="flex items-center justify-between mb-1.5">
+                                <div className="flex items-center justify-between mb-1.5 sm:min-h-7">
                                   <label className="text-xs font-bold text-foreground">
                                     {t('timeRateLabel')} <span className="text-destructive">*</span>
                                   </label>
@@ -2088,7 +2179,7 @@ export function BucketCard({
 
                               {/* Time Spent Input */}
                               <div>
-                                <label className="block text-xs font-bold text-foreground mb-1.5">
+                                <label className="block text-xs font-bold text-foreground mb-1.5 sm:flex sm:min-h-7 sm:items-center">
                                   {t('timeSpentLabel')} <span className="text-destructive">*</span>
                                 </label>
                                 <div className="relative">
@@ -2548,12 +2639,6 @@ export function BucketCard({
                                 <label className="block text-xs font-bold text-foreground">
                                   {t('unitsCovered')}
                                 </label>
-                                <span className="text-[11px] text-muted-foreground">
-                                  {t('monthlySalaryCoversHint', {
-                                    units: monthlyUnits || defaultUnitsCovered || '1',
-                                    unit: unitLabel || 'units',
-                                  })}
-                                </span>
                               </div>
                               <div className="relative">
                                 <input
@@ -3157,7 +3242,7 @@ export function BucketCard({
               </div>
 
               {/* Unallocated Cash Balance Tools */}
-              {hasInitialGuess && unallocatedCost > 0.01 && (
+              {hasInitialGuess && !isTransport && unallocatedCost > 0.01 && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3 sm:p-3.5">
                   <div className="min-w-0">
                     <span className="text-xs font-bold text-foreground block">
@@ -3197,7 +3282,7 @@ export function BucketCard({
               )}
 
               {/* Add Item Button (Shown when items exist; otherwise Question Prompt creates the first item) */}
-              {bucket.items.length > 0 && (
+              {bucket.items.length > 0 && !isTransport && (
                 <Button
                   type="button"
                   variant="outline"

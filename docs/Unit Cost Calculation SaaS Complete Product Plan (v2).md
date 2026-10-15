@@ -222,10 +222,10 @@ Validation: salvage value must be below purchase price.
 
 ### 6.6 Module D: Transport and Distribution
 
-- **Inbound freight:** added to material cost, allocated across the materials it delivered.
-- **Outbound freight:** delivery cost allocated to products.
-- **Shared shipments:** a single invoice split across products by weight, volume, unit count or custom %.
-- Allocation method is chosen per cost pool, not hard-wired.
+- **Inbound freight:** included in production unit cost and can be associated with selected material lines in Level 3; its per-material allocation is proportional to material cost. Level 3 shipment measures can also allocate a shared shipment across products.
+- **Outbound freight:** shown separately from production unit cost. Seller-paid delivery is priced into the product's delivered price; customer-paid delivery remains outside the product price and is added as a separate checkout charge.
+- Legacy or unspecified transport entries continue to count as production cost.
+- Delivery cost behavior can be split into fixed and variable portions in Level 3 for break-even analysis.
 
 ### 6.7 Module E: Overhead and Utilities
 

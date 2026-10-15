@@ -63,6 +63,7 @@ class LineItemInput(BaseModel):
             "allocation_basis",
             "amortization_method",
             "direction",
+            "delivery_treatment",
         ):
             value = self.details.get(field_name)
             if value is not None and not isinstance(value, str):
@@ -84,6 +85,11 @@ class LineItemInput(BaseModel):
             raise ValueError("allocation_basis must be quantity, weight, or volume.")
         if self.details.get("direction", "shared") not in {"inbound", "outbound", "shared"}:
             raise ValueError("direction must be inbound, outbound, or shared.")
+        if self.details.get("delivery_treatment", "seller_paid") not in {
+            "seller_paid",
+            "customer_paid",
+        }:
+            raise ValueError("delivery_treatment must be seller_paid or customer_paid.")
         if depreciation_method == "units" and _detail_decimal(self.details, "lifetime_units") <= 0:
             raise ValueError("lifetime_units must be greater than zero for units depreciation.")
         if depreciation_method == "periods" and _detail_decimal(self.details, "useful_life_periods") <= 0:
@@ -286,10 +292,14 @@ class CalculationResponse(BaseModel):
     cash_unit_cost: Decimal
     economic_unit_cost: Decimal
     cost_view: Literal["cash", "economic"]
+    seller_paid_delivery_per_unit: Decimal = Decimal("0.0")
+    customer_paid_delivery_per_unit: Decimal = Decimal("0.0")
     pricing_type: str
     pricing_percentage: Decimal
     target_selling_price: Optional[Decimal] = None
     suggested_price: Decimal
+    suggested_product_price: Decimal = Decimal("0.0")
+    suggested_delivered_price: Decimal = Decimal("0.0")
     profit_per_unit: Decimal
     total_expected_profit: Decimal
     equivalent_markup_or_margin: Decimal

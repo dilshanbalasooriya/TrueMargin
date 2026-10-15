@@ -28,12 +28,16 @@ export interface CalculationResult {
   cash_unit_cost: string;
   economic_unit_cost: string;
   cost_view: 'cash' | 'economic';
+  seller_paid_delivery_per_unit: string;
+  customer_paid_delivery_per_unit: string;
   break_even_units: string | null;
   break_even_ready: boolean;
   is_loss_making: boolean;
   pricing_type: 'markup' | 'margin';
   pricing_percentage: string;
   suggested_price: string;
+  suggested_product_price: string;
+  suggested_delivered_price: string;
   profit_per_unit: string;
   total_expected_profit: string;
   equivalent_markup_or_margin: string;
@@ -67,6 +71,7 @@ export interface CalculationResult {
       kind: string;
       pinned: boolean;
       is_imputed: boolean;
+      details?: Record<string, string>;
     }>;
   }>;
 }
@@ -164,26 +169,29 @@ export function buildCalculationRequest(draft: GuestDraft, locale = 'en') {
           ...(item.details?.cost_behavior
             ? { cost_behavior: item.details.cost_behavior as 'variable' | 'fixed' }
             : {}),
-          details: Object.fromEntries(
-            Object.entries(item.details ?? {})
-              .filter(([detailKey, value]) =>
-                value.trim() !== ''
-                && !(
-                  detailKey === 'amortization_units'
-                  && item.details?.amortization_method === 'none'
-                ),
-              )
-              .map(([detailKey, value]) => [
-                detailKey,
-                detailKey.endsWith('_percentage')
-                  || detailKey.endsWith('_amount')
-                  || detailKey.endsWith('_units')
-                  || detailKey.endsWith('_price')
-                  || detailKey.endsWith('_measure')
-                  ? normalizeDecimalInput(value, locale)
-                  : value,
-              ]),
-          ),
+          details: {
+            ...Object.fromEntries(
+              Object.entries(item.details ?? {})
+                .filter(([detailKey, value]) =>
+                  value.trim() !== ''
+                  && !(
+                    detailKey === 'amortization_units'
+                    && item.details?.amortization_method === 'none'
+                  ),
+                )
+                .map(([detailKey, value]) => [
+                  detailKey,
+                  detailKey.endsWith('_percentage')
+                    || detailKey.endsWith('_amount')
+                    || detailKey.endsWith('_units')
+                    || detailKey.endsWith('_price')
+                    || detailKey.endsWith('_measure')
+                    ? normalizeDecimalInput(value, locale)
+                    : value,
+                ]),
+            ),
+            ...(key === 'material' ? { source_item_id: item.id } : {}),
+          },
         })),
     }));
 
@@ -417,7 +425,12 @@ export interface SheetVersionDetail {
   defective_units?: string;
   pricing_type: 'markup' | 'margin';
   pricing_percentage: string;
+  suggested_price?: string;
+  suggested_product_price?: string;
+  suggested_delivered_price?: string;
   default_units_covered_scope?: 'all' | 'overhead_only';
+  seller_paid_delivery_per_unit?: string;
+  customer_paid_delivery_per_unit?: string;
   bucket_breakdown: Array<{
     type: string;
     label: string;
@@ -434,6 +447,7 @@ export interface SheetVersionDetail {
       amount: string;
       units_covered: string;
       is_imputed?: boolean;
+      details?: Record<string, string>;
     }>;
   }>;
 }
@@ -465,14 +479,14 @@ export function loadSheetVersionIntoDraft(
       unitsCovered: b.units_covered ? String(b.units_covered) : '',
       isNone: b.hidden || false,
       items: (b.items || []).map((item) => ({
-        id: crypto.randomUUID(),
+        id: item.details?.source_item_id || crypto.randomUUID(),
         name: item.name || '',
         amount: item.amount ? String(item.amount) : '',
         unitsCovered: item.units_covered ? String(item.units_covered) : '',
         purchaseQuantity: item.quantity ? String(item.quantity) : undefined,
         purchaseUnit: item.unit || undefined,
         isImputed: item.is_imputed,
-        details: {},
+        details: item.details ?? {},
       })),
     };
   }

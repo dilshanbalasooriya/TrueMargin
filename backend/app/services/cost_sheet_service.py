@@ -300,6 +300,12 @@ class CostSheetService:
             cash_unit_cost=Decimal(str(snap.get("cash_unit_cost", snap.get("unit_cost", 0)))),
             economic_unit_cost=Decimal(str(snap.get("economic_unit_cost", snap.get("unit_cost", 0)))),
             cost_view=snap.get("cost_view", "economic"),
+            seller_paid_delivery_per_unit=Decimal(
+                str(snap.get("seller_paid_delivery_per_unit", 0))
+            ),
+            customer_paid_delivery_per_unit=Decimal(
+                str(snap.get("customer_paid_delivery_per_unit", 0))
+            ),
             default_units_covered_scope=snap.get("default_units_covered_scope", "all"),
             pricing_type=snap.get("pricing_type", "markup"),
             pricing_percentage=Decimal(str(snap.get("pricing_percentage", 0))),
@@ -309,6 +315,12 @@ class CostSheetService:
                 else None
             ),
             suggested_price=Decimal(str(snap.get("suggested_price", 0))),
+            suggested_product_price=Decimal(
+                str(snap.get("suggested_product_price", snap.get("suggested_price", 0)))
+            ),
+            suggested_delivered_price=Decimal(
+                str(snap.get("suggested_delivered_price", snap.get("suggested_price", 0)))
+            ),
             profit_per_unit=Decimal(str(snap.get("profit_per_unit", 0))),
             total_expected_profit=Decimal(str(snap.get("total_expected_profit", 0))),
             equivalent_markup_or_margin=Decimal(

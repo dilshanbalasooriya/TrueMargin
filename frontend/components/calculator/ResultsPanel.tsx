@@ -105,7 +105,7 @@ function ResultDetails({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2 rounded-xl bg-primary p-4 text-primary-foreground">
-          <p className="text-sm text-primary-foreground/80">{t('unitCost')}</p>
+          <p className="text-sm text-primary-foreground/80">{t('productionUnitCost')}</p>
           <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
             {formatCurrency(result.unit_cost, currencyCode, locale)}
           </p>
@@ -113,7 +113,26 @@ function ResultDetails({
         </div>
         <Metric label={t('cashUnitCost')} value={formatCurrency(result.cash_unit_cost, currencyCode, locale)} />
         <Metric label={t('economicUnitCost')} value={formatCurrency(result.economic_unit_cost, currencyCode, locale)} />
-        <Metric label={t('suggestedPrice')} value={formatCurrency(result.suggested_price, currencyCode, locale)} />
+        {Number(result.seller_paid_delivery_per_unit) > 0 && (
+          <Metric
+            label={t('sellerPaidDeliveryCost')}
+            value={formatCurrency(result.seller_paid_delivery_per_unit, currencyCode, locale)}
+          />
+        )}
+        {Number(result.customer_paid_delivery_per_unit) > 0 && (
+          <Metric
+            label={t('customerPaidDeliveryCost')}
+            value={formatCurrency(result.customer_paid_delivery_per_unit, currencyCode, locale)}
+          />
+        )}
+        <Metric
+          label={t('suggestedProductPrice')}
+          value={formatCurrency(result.suggested_product_price, currencyCode, locale)}
+        />
+        <Metric
+          label={t('suggestedDeliveredPrice')}
+          value={formatCurrency(result.suggested_delivered_price, currencyCode, locale)}
+        />
         <Metric label={t('profitPerUnit')} value={formatCurrency(result.profit_per_unit, currencyCode, locale)} />
         <Metric label={t('totalProfit')} value={formatCurrency(result.total_expected_profit, currencyCode, locale)} />
         <Metric label={t(equivalentKey)} value={`${result.equivalent_markup_or_margin}%`} />

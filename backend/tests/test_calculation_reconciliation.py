@@ -1,5 +1,6 @@
 import unittest
 from decimal import Decimal
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
@@ -324,6 +325,160 @@ class TestAdvancedCosting(unittest.TestCase):
             )],
         )
         self.assertEqual(self.calculate(bucket).cash_total_cost, Decimal("20.0000"))
+
+    def test_inbound_transport_is_included_in_production_cost(self):
+        bucket = BucketInput(
+            type="transport",
+            label="Transport",
+            declared_total=Decimal("0"),
+            items=[LineItemInput(
+                name="Supplier freight",
+                amount=Decimal("30"),
+                units_covered=Decimal("10"),
+                details={"direction": "inbound"},
+            )],
+        )
+
+        result = self.calculate(bucket, pricing_percentage=Decimal("30"))
+
+        self.assertEqual(result.unit_cost, Decimal("3.0000"))
+        self.assertEqual(result.seller_paid_delivery_per_unit, Decimal("0.0000"))
+        self.assertEqual(result.suggested_product_price, Decimal("3.9000"))
+        self.assertEqual(result.suggested_delivered_price, Decimal("3.9000"))
+
+    def test_inbound_transport_allocation_is_recorded_for_selected_materials(self):
+        materials = BucketInput(
+            type="material",
+            label="Materials",
+            declared_total=Decimal("100"),
+            items=[
+                LineItemInput(
+                    name="Flour",
+                    amount=Decimal("80"),
+                    units_covered=Decimal("10"),
+                    details={"source_item_id": "flour-id"},
+                ),
+                LineItemInput(
+                    name="Sugar",
+                    amount=Decimal("20"),
+                    units_covered=Decimal("10"),
+                    details={"source_item_id": "sugar-id"},
+                ),
+            ],
+        )
+        transport = BucketInput(
+            type="transport",
+            label="Transport",
+            declared_total=Decimal("10"),
+            items=[LineItemInput(
+                name="Supplier freight",
+                amount=Decimal("10"),
+                units_covered=Decimal("10"),
+                details={
+                    "direction": "inbound",
+                    "allocated_material_ids": "sugar-id",
+                },
+            )],
+        )
+
+        result = self.calculate(
+            transport,
+            buckets=[materials, transport],
+        )
+
+        details = result.bucket_breakdown[1].items[0].details
+        allocations = json.loads(details["material_allocations"])
+        self.assertEqual(allocations, [{
+            "amount": "10.0000",
+            "material_id": "sugar-id",
+            "material_name": "Sugar",
+            "share": "100.0000",
+        }])
+        self.assertEqual(result.unit_cost, Decimal("11.0000"))
+
+    def test_seller_paid_outbound_delivery_is_added_to_delivered_price_not_unit_cost(self):
+        materials = BucketInput(
+            type="material",
+            label="Materials",
+            declared_total=Decimal("100"),
+            level=3,
+            items=[LineItemInput(
+                name="Materials",
+                amount=Decimal("100"),
+                units_covered=Decimal("10"),
+                details={"variable_percentage": "100"},
+            )],
+        )
+        transport = BucketInput(
+            type="transport",
+            label="Transport",
+            declared_total=Decimal("0"),
+            level=3,
+            items=[LineItemInput(
+                name="Courier",
+                amount=Decimal("20"),
+                units_covered=Decimal("10"),
+                details={
+                    "direction": "outbound",
+                    "delivery_treatment": "seller_paid",
+                    "variable_percentage": "100",
+                },
+            )],
+        )
+
+        result = self.calculate(
+            transport,
+            buckets=[materials, transport],
+            pricing_type="margin",
+            pricing_percentage=Decimal("20"),
+        )
+
+        self.assertEqual(result.unit_cost, Decimal("10.0000"))
+        self.assertEqual(result.total_cost, Decimal("100.0000"))
+        self.assertEqual(result.seller_paid_delivery_per_unit, Decimal("2.0000"))
+        self.assertEqual(result.suggested_product_price, Decimal("12.5000"))
+        self.assertEqual(result.suggested_delivered_price, Decimal("15.0000"))
+        self.assertEqual(result.suggested_price, result.suggested_delivered_price)
+        self.assertEqual(result.profit_per_unit, Decimal("3.0000"))
+        self.assertTrue(result.break_even_ready)
+
+    def test_customer_paid_delivery_stays_separate_from_product_price(self):
+        materials = BucketInput(
+            type="material",
+            label="Materials",
+            declared_total=Decimal("100"),
+            items=[LineItemInput(
+                name="Materials",
+                amount=Decimal("100"),
+                units_covered=Decimal("10"),
+            )],
+        )
+        transport = BucketInput(
+            type="transport",
+            label="Transport",
+            declared_total=Decimal("0"),
+            items=[LineItemInput(
+                name="Courier",
+                amount=Decimal("30"),
+                units_covered=Decimal("10"),
+                details={
+                    "direction": "outbound",
+                    "delivery_treatment": "customer_paid",
+                },
+            )],
+        )
+
+        result = self.calculate(
+            transport,
+            buckets=[materials, transport],
+            pricing_percentage=Decimal("30"),
+        )
+
+        self.assertEqual(result.unit_cost, Decimal("10.0000"))
+        self.assertEqual(result.customer_paid_delivery_per_unit, Decimal("3.0000"))
+        self.assertEqual(result.suggested_product_price, Decimal("13.0000"))
+        self.assertEqual(result.suggested_delivered_price, Decimal("16.0000"))
+        self.assertEqual(result.profit_per_unit, Decimal("3.0000"))
 
     def test_machine_depreciation_by_useful_life_period(self):
         bucket = BucketInput(
