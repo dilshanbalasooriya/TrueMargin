@@ -5,16 +5,15 @@ import { useLocale, useTranslations } from 'next-intl';
 import { BucketCard } from '@/components/calculator/BucketCard';
 import { CostSheetSetup } from '@/components/calculator/CostSheetSetup';
 import { MobileResultBar } from '@/components/calculator/MobileResultBar';
-import { PricingControls } from '@/components/calculator/PricingControls';
 import { ResultsPanel } from '@/components/calculator/ResultsPanel';
-import { Input } from '@/components/ui/input';
-import { ApiError, calculateCostSheet, downloadVersionReport, saveCostSheet, syncUserProfile } from '@/lib/api-client';
+import { ApiError, calculateCostSheet, downloadVersionReport, isCalculableLineItem, saveCostSheet, syncUserProfile } from '@/lib/api-client';
 import { isValidCurrencyCode } from '@/lib/currencies';
 import { parseDecimalInput } from '@/lib/numbers';
 import { useCalculatorStore } from '@/store/useCalculatorStore';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { toast } from '@/store/useToast';
 import { Lock, PieChart, Zap, Ban } from 'lucide-react';
+import { cn } from 'cn';
 import type { CalculationResult } from '@/lib/api-client';
 import type { BucketDraft, GuestDraft } from '@/store/useCalculatorStore';
 
@@ -34,142 +33,80 @@ function hasValidNumber(value: string, locale: string, optional = false): boolea
   return parseDecimalInput(value, locale) !== null;
 }
 
-function isValidDraft(draft: GuestDraft, locale: string): boolean {
-  if (
-    !draft.productName.trim()
-    || !draft.unitLabel.trim()
-    || !draft.productionBasis
-    || !draft.defaultUnitsCoveredScope
-  ) return false;
+function hasInputError(draft: GuestDraft, locale: string): boolean {
+  if (draft.unitsProduced.trim()) {
+    const units = parseDecimalInput(draft.unitsProduced, locale);
+    if (units === null || units <= 0) return true;
+  }
+  if (draft.defectiveUnits.trim()) {
+    const defects = parseDecimalInput(draft.defectiveUnits, locale);
+    const units = parseDecimalInput(draft.unitsProduced, locale);
+    if (defects === null || defects < 0) return true;
+    if (units !== null && defects >= units) return true;
+  }
+  if (draft.pricingPercentage.trim()) {
+    const pct = parseDecimalInput(draft.pricingPercentage, locale);
+    if (pct === null || pct < 0) return true;
+    if (draft.pricingType === 'margin' && pct >= 100) return true;
+  }
 
-  const unitsProduced = parseDecimalInput(draft.unitsProduced, locale);
-  const defectiveUnits = draft.defectiveUnits.trim() === '' ? 0 : parseDecimalInput(draft.defectiveUnits, locale);
-  const pricingPercentage = parseDecimalInput(draft.pricingPercentage, locale);
-  if (unitsProduced === null || defectiveUnits === null || pricingPercentage === null) return false;
-  if (!Number.isFinite(unitsProduced) || unitsProduced <= 0) return false;
-  if (!Number.isFinite(defectiveUnits) || defectiveUnits < 0 || defectiveUnits >= unitsProduced) return false;
-  if (!Number.isFinite(pricingPercentage) || pricingPercentage < 0) return false;
-  if (draft.pricingType === 'margin' && pricingPercentage >= 100) return false;
-  if (!isValidCurrencyCode(draft.currencyCode)) return false;
-
-  const numericDetailKeys = new Set([
-    'wastage_percentage',
-    'scrap_recovery_amount',
-    'statutory_percentage',
-    'bonus_percentage',
-    'allocation_percentage',
-    'variable_percentage',
-    'allocation_measure',
-    'allocation_total_measure',
-    'purchase_price',
-    'salvage_value',
-    'lifetime_units',
-    'useful_life_periods',
-    'amortization_units',
-  ]);
-
-  for (const [key, bucket] of Object.entries(draft.buckets)) {
-    if (draft.defaultUnitsCoveredScope === 'overhead_only' && key !== 'overhead' && !bucket.isNone) {
-      const hasCost = bucket.totalSpent.trim() !== ''
-        || bucket.items.some((item) => item.name.trim() || item.amount.trim());
-      if (hasCost && !bucket.unitsCovered.trim()) return false;
-    }
-
-    const bucketCoverage = bucket.unitsCovered.trim()
-      ? parseDecimalInput(bucket.unitsCovered, locale)
-      : null;
-    if (bucket.totalSpent.trim() && !hasValidNumber(bucket.totalSpent, locale)) return false;
-    if (bucket.unitsCovered.trim() && (bucketCoverage === null || bucketCoverage <= 0)) return false;
+  // Check any items for explicit errors (e.g. salvage > purchase, wastage >= 100)
+  for (const bucket of Object.values(draft.buckets)) {
     for (const item of bucket.items) {
-      const hasDetails = Object.values(item.details ?? {}).some((value) => value.trim());
-      if (
-        item.name.trim()
-        || item.amount.trim()
-        || item.unitsCovered.trim()
-        || item.purchaseQuantity?.trim()
-        || item.purchaseUnit?.trim()
-        || hasDetails
-      ) {
-        if (item.purchaseQuantity?.trim()) {
-          const quantity = parseDecimalInput(item.purchaseQuantity, locale);
-          if (quantity === null || quantity <= 0) return false;
-        }
-        const itemCoverage = item.unitsCovered.trim()
-          ? parseDecimalInput(item.unitsCovered, locale)
-          : null;
-        const calculatedByDepreciation = ['units', 'periods'].includes(
-          item.details?.depreciation_method ?? '',
-        );
-        if (!item.name.trim()) return false;
-        if (item.amount.trim() && !hasValidNumber(item.amount, locale)) return false;
-        if (!item.amount.trim() && !calculatedByDepreciation) return false;
-        if (item.unitsCovered.trim() && (itemCoverage === null || itemCoverage <= 0)) return false;
-
-        for (const [field, value] of Object.entries(item.details ?? {})) {
-          if (!value.trim()) continue;
-          if (numericDetailKeys.has(field) && !hasValidNumber(value, locale)) return false;
-          if (field.endsWith('_percentage')) {
-            const percentage = parseDecimalInput(value, locale);
-            if (percentage === null || percentage < 0 || percentage > 100) return false;
-            if (field === 'wastage_percentage' && percentage >= 100) return false;
-          }
-        }
-
-        const details = item.details ?? {};
-        if (
-          key === 'transport'
-          && details.direction === 'outbound'
-          && !['seller_paid', 'customer_paid'].includes(
-            details.delivery_treatment ?? 'seller_paid',
-          )
-        ) return false;
-        const allocationMeasure = details.allocation_measure?.trim();
-        const allocationTotal = details.allocation_total_measure?.trim();
-        if (Boolean(allocationMeasure) !== Boolean(allocationTotal)) return false;
-        if (allocationMeasure && allocationTotal) {
-          const amount = parseDecimalInput(allocationMeasure, locale);
-          const total = parseDecimalInput(allocationTotal, locale);
-          if (amount === null || total === null || amount <= 0 || total <= 0 || amount > total) return false;
-        }
-
-        if (details.depreciation_method === 'units' || details.depreciation_method === 'periods') {
-          const purchase = parseDecimalInput(details.purchase_price ?? '', locale);
-          const lifetime = parseDecimalInput(
-            details.depreciation_method === 'units'
-              ? details.lifetime_units ?? ''
-              : details.useful_life_periods ?? '',
-            locale,
-          );
-          const salvage = details.salvage_value?.trim()
-            ? parseDecimalInput(details.salvage_value, locale)
-            : 0;
-          if (purchase === null || purchase < 0 || lifetime === null || lifetime <= 0 || salvage === null || salvage > purchase) return false;
-        }
-
-        if (
-          details.amortization_method
-          && details.amortization_method !== 'none'
-          && (!details.amortization_units?.trim()
-            || (parseDecimalInput(details.amortization_units, locale) ?? 0) <= 0)
-        ) return false;
+      const details = item.details ?? {};
+      if (details.salvage_value && details.purchase_price) {
+        const salvage = parseDecimalInput(details.salvage_value, locale);
+        const purchase = parseDecimalInput(details.purchase_price, locale);
+        if (salvage !== null && purchase !== null && salvage > purchase) return true;
+      }
+      if (details.wastage_percentage) {
+        const wastage = parseDecimalInput(details.wastage_percentage, locale);
+        if (wastage !== null && (wastage < 0 || wastage >= 100)) return true;
+      }
+      if (details.allocation_measure && details.allocation_total_measure) {
+        const alloc = parseDecimalInput(details.allocation_measure, locale);
+        const total = parseDecimalInput(details.allocation_total_measure, locale);
+        if (alloc !== null && total !== null && (alloc <= 0 || total <= 0 || alloc > total)) return true;
       }
     }
   }
-  return true;
+  return false;
 }
 
-function bucketIsAnswered(bucket: BucketDraft | undefined): boolean {
-  return Boolean(
-    bucket?.isNone
-    || bucket?.totalSpent.trim()
-    || bucket?.items.some((item) =>
-      item.name.trim()
-      && (
-        item.amount.trim()
-        || ['units', 'periods'].includes(item.details?.depreciation_method ?? '')
-      ),
-    ),
-  );
+function isCalculableDraft(draft: GuestDraft, locale: string): boolean {
+  // Units produced is strictly required for calculation
+  const unitsProduced = parseDecimalInput(draft.unitsProduced, locale);
+  if (unitsProduced === null || !Number.isFinite(unitsProduced) || unitsProduced <= 0) return false;
+
+  // Defective units: if provided, must be valid and less than units produced
+  if (draft.defectiveUnits.trim()) {
+    const defectiveUnits = parseDecimalInput(draft.defectiveUnits, locale);
+    if (defectiveUnits === null || !Number.isFinite(defectiveUnits) || defectiveUnits < 0 || defectiveUnits >= unitsProduced) {
+      return false;
+    }
+  }
+
+  // Pricing percentage: must be >= 0, and if margin, < 100
+  if (draft.pricingPercentage.trim()) {
+    const pricingPercentage = parseDecimalInput(draft.pricingPercentage, locale);
+    if (pricingPercentage === null || !Number.isFinite(pricingPercentage) || pricingPercentage < 0) return false;
+    if (draft.pricingType === 'margin' && pricingPercentage >= 100) return false;
+  }
+
+  if (!isValidCurrencyCode(draft.currencyCode)) return false;
+
+  // Don't calculate if explicit mathematical input errors exist
+  if (hasInputError(draft, locale)) return false;
+
+  // Must have at least one answered bucket
+  return BUCKETS.some(({ key }) => bucketIsAnswered(draft.buckets[key], locale));
+}
+
+function bucketIsAnswered(bucket: BucketDraft | undefined, locale = 'en'): boolean {
+  if (!bucket) return false;
+  if (bucket.isNone) return true;
+  if (bucket.totalSpent.trim() && (parseDecimalInput(bucket.totalSpent, locale) ?? -1) >= 0) return true;
+  return bucket.items.some((item) => isCalculableLineItem(item, locale));
 }
 
 export function CalculatorPage() {
@@ -258,6 +195,66 @@ export function CalculatorPage() {
     }, 120);
   };
 
+  const handleBucketToggle = (key: string, expanded: boolean) => {
+    if (expanded) {
+      setExpandedBucketKey(key);
+      window.setTimeout(() => {
+        const el = document.getElementById(`bucket-card-${key}`);
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          if (rect.top < 80 || rect.top > window.innerHeight * 0.75) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }
+      }, 70);
+    } else {
+      setExpandedBucketKey(null);
+    }
+  };
+
+  // Auto-close open bucket when clicking outside
+  useEffect(() => {
+    if (!expandedBucketKey) return;
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Element | null;
+      if (!target) return;
+
+      // 1. If clicking inside the active bucket card, do not close
+      const activeCard = document.getElementById(`bucket-card-${expandedBucketKey}`);
+      if (activeCard && activeCard.contains(target)) {
+        return;
+      }
+
+      // 2. If clicking on any other bucket card, let that card's toggle handler run
+      if (target.closest('[id^="bucket-card-"]')) {
+        return;
+      }
+
+      // 3. If clicking inside modal dialogs, popovers, alerts/toasts, or dropdown portals
+      if (
+        target.closest('[role="dialog"]') ||
+        target.closest('[role="alert"]') ||
+        target.closest('[data-radix-portal]') ||
+        target.closest('[data-radix-popper-content-wrapper]') ||
+        target.closest('.toaster')
+      ) {
+        return;
+      }
+
+      // 4. Clicked outside: close the active bucket!
+      setExpandedBucketKey(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [expandedBucketKey]);
+
   useEffect(() => {
     if (!hydrated || !user) {
       profileUserId.current = null;
@@ -285,15 +282,13 @@ export function CalculatorPage() {
   useEffect(() => {
     if (!hydrated) return;
 
-    const answered = BUCKETS.some(({ key }) => bucketIsAnswered(draft.buckets[key]));
+    const answered = BUCKETS.some(({ key }) => bucketIsAnswered(draft.buckets[key], locale));
     const started = Boolean(
-      draft.productName.trim()
-      || draft.unitLabel.trim()
-      || draft.unitsProduced.trim()
+      draft.unitsProduced.trim()
       || draft.defectiveUnits.trim()
       || answered,
     );
-    if (!started || !answered || !isValidDraft(draft, locale)) return;
+    if (!started || !answered || !isCalculableDraft(draft, locale)) return;
 
     const controller = new AbortController();
     const sequence = ++requestSequence.current;
@@ -310,6 +305,7 @@ export function CalculatorPage() {
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
           if (sequence !== requestSequence.current) return;
+          console.warn('[TrueMargin Calculator] Calculation error:', error);
           if (!navigator.onLine) {
             setCalculationError('offline');
           } else if (error instanceof ApiError && error.status === 422) {
@@ -321,7 +317,7 @@ export function CalculatorPage() {
         .finally(() => {
           if (sequence === requestSequence.current) setLoading(false);
         });
-    }, 300);
+    }, 250);
 
     return () => {
       window.clearTimeout(timeout);
@@ -357,19 +353,24 @@ export function CalculatorPage() {
     return BUCKETS;
   }, [draft.kind]);
 
-  const answered = BUCKETS.some(({ key }) => bucketIsAnswered(draft.buckets[key]));
+  const answered = BUCKETS.some(({ key }) => bucketIsAnswered(draft.buckets[key], locale));
   const started = Boolean(draft.unitsProduced.trim() || draft.defectiveUnits.trim() || answered);
-  const draftValid = isValidDraft(draft, locale);
+  const draftCalculable = isCalculableDraft(draft, locale);
+  const inputHasError = hasInputError(draft, locale);
   const visibleResult = answered ? result : null;
-  const visibleError = started && !draftValid ? 'invalid' : calculationError;
-  const visibleLoading = loading && started && answered && draftValid;
+  const visibleError = inputHasError ? 'invalid' : calculationError;
+  const visibleLoading = loading && started && answered && draftCalculable;
 
   const save = async () => {
     if (!user) {
       toast.error(t('saveNeedsLogin'));
       return;
     }
-    if (!draft.productName.trim() || !visibleResult || !draftValid || visibleLoading) return;
+    if (!draft.productName.trim()) {
+      toast.error(locale === 'si' ? 'කරුණාකර නිෂ්පාදනයේ නම ඇතුළත් කරන්න.' : 'Please enter a product name before saving.');
+      return;
+    }
+    if (!visibleResult || !draftCalculable || visibleLoading) return;
     setSaving(true);
     try {
       let workspaceId = draft.workspaceId;
@@ -458,6 +459,10 @@ export function CalculatorPage() {
     saving,
     saved,
     versionId: draft.versionId,
+    pricingType: draft.pricingType,
+    pricingPercentage: draft.pricingPercentage,
+    buckets: draft.buckets,
+    onPricingChange: changeDraft,
     onSave: () => void save(),
     onDownloadCsv: () => void downloadCsv(),
     onPrint: () => void printReport(),
@@ -491,7 +496,7 @@ export function CalculatorPage() {
           </div>
         </div>
 
-        <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-8">
+        <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_28rem] xl:grid-cols-[minmax(0,1fr)_30rem] lg:gap-8">
           <div className="min-w-0 space-y-8">
             <CostSheetSetup
               key={`setup-${resetCount}-${draft.sheetId || 'new'}`}
@@ -570,7 +575,15 @@ export function CalculatorPage() {
               </div>
               <div className="space-y-3">
                 {orderedBuckets.map(({ key, titleKey, questionKey }) => (
-                  <div key={`${resetCount}-${draft.sheetId || 'new'}-${key}`}>
+                  <div
+                    key={`${resetCount}-${draft.sheetId || 'new'}-${key}`}
+                    className={cn(
+                      "transition-all duration-300 ease-out",
+                      expandedBucketKey && expandedBucketKey !== key
+                        ? "opacity-75 hover:opacity-100 scale-[0.995] hover:scale-100"
+                        : "opacity-100 scale-100"
+                    )}
+                  >
                     <BucketCard
                       key={`${resetCount}-${draft.sheetId || 'new'}-${key}`}
                       bucketKey={key}
@@ -607,38 +620,13 @@ export function CalculatorPage() {
                           : []
                       }
                       isExpanded={expandedBucketKey === key}
-                      onToggleExpand={(expanded) => setExpandedBucketKey(expanded ? key : null)}
+                      onToggleExpand={(expanded) => handleBucketToggle(key, expanded)}
                       onChange={(updates) => changeBucket(key, updates)}
                     />
                   </div>
                 ))}
               </div>
-              <details className="rounded-xl border border-border bg-card p-4 sm:p-5">
-                <summary className="cursor-pointer text-sm font-semibold">{t('level3ProductionDetails')}</summary>
-                <div className="mt-4 max-w-sm space-y-2">
-                  <label htmlFor="defective-units" className="text-sm font-medium">
-                    {t('defects')} <span className="font-normal text-muted-foreground">({t('optional')})</span>
-                  </label>
-                  <Input
-                    id="defective-units"
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    value={draft.defectiveUnits}
-                    onChange={(event) => changeDraft({ defectiveUnits: event.target.value })}
-                    placeholder="0"
-                    className="min-h-11"
-                  />
-                  <p className="text-xs leading-5 text-muted-foreground">{t('defectsHint')}</p>
-                </div>
-              </details>
             </section>
-
-            <PricingControls
-              pricingType={draft.pricingType}
-              percentage={draft.pricingPercentage}
-              onChange={changeDraft}
-            />
           </div>
 
           <aside className="hidden md:block md:col-span-1 lg:sticky lg:top-24" aria-live="polite">

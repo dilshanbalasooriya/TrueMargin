@@ -44,12 +44,12 @@ export function MobileResultBar(props: MobileResultBarProps) {
             >
               <span className="grid min-w-0 flex-1 grid-cols-2 gap-3">
                 <span className="min-w-0">
-                  <span className="block text-[11px] text-muted-foreground">{t('productionUnitCost')}</span>
+                  <span className="block text-[11px] text-muted-foreground">{t('unitCostPrice')}</span>
                   <span className="block truncate text-base font-semibold tabular-nums">{unitCost}</span>
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-[11px] text-muted-foreground">{t('suggestedDeliveredPrice')}</span>
-                  <span className="block truncate text-base font-semibold tabular-nums">{suggestedPrice}</span>
+                  <span className="block text-[11px] font-semibold text-primary">{t('finalSellingPrice')}</span>
+                  <span className="block truncate text-base font-bold text-primary tabular-nums">{suggestedPrice}</span>
                 </span>
               </span>
               <ChevronUp className="size-4 shrink-0 text-primary" aria-hidden="true" />

@@ -22,11 +22,11 @@ async def lifespan(app: FastAPI):
     Application lifespan context manager.
     Executes startup checks and cleanup routines.
     """
-    print("🚀 Initializing database tables...")
+    print("[INFO] Initializing database tables...")
     SQLModel.metadata.create_all(engine)
-    print("🚀 Starting Unit Cost Calculation SaaS Engine...")
+    print("[INFO] Starting Unit Cost Calculation SaaS Engine...")
     yield
-    print("🛑 Shutting down API service...")
+    print("[INFO] Shutting down API service...")
 
 
 app = FastAPI(
@@ -52,6 +52,7 @@ allowed_origins = (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

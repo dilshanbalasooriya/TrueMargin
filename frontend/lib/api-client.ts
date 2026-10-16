@@ -1,9 +1,16 @@
 import { createClient } from '@/lib/supabase/client';
-import { normalizeDecimalInput } from '@/lib/numbers';
-import type { BucketDraft, GuestDraft } from '@/store/useCalculatorStore';
+import { normalizeDecimalInput, parseDecimalInput } from '@/lib/numbers';
+import type { BucketDraft, GuestDraft, LineItemDraft } from '@/store/useCalculatorStore';
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+export function getApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+  }
+  return 'http://localhost:8000/api/v1';
+}
 
 export class ApiError extends Error {
   constructor(
@@ -116,17 +123,41 @@ export interface SavedVersion {
   currency_code: string;
 }
 
+export function isCalculableLineItem(item: LineItemDraft, locale = 'en'): boolean {
+  if (!item.name?.trim()) return false;
+
+  const depMethod = item.details?.depreciation_method;
+  if (depMethod === 'units') {
+    const purchase = parseDecimalInput(item.details?.purchase_price ?? '', locale);
+    const lifetime = parseDecimalInput(item.details?.lifetime_units ?? '', locale);
+    const salvage = item.details?.salvage_value?.trim()
+      ? parseDecimalInput(item.details.salvage_value, locale)
+      : 0;
+    if (purchase === null || purchase < 0 || lifetime === null || lifetime <= 0) return false;
+    if (salvage === null || salvage < 0 || salvage > purchase) return false;
+    return true;
+  }
+  if (depMethod === 'periods') {
+    const purchase = parseDecimalInput(item.details?.purchase_price ?? '', locale);
+    const periods = parseDecimalInput(item.details?.useful_life_periods ?? '', locale);
+    const salvage = item.details?.salvage_value?.trim()
+      ? parseDecimalInput(item.details.salvage_value, locale)
+      : 0;
+    if (purchase === null || purchase < 0 || periods === null || periods <= 0) return false;
+    if (salvage === null || salvage < 0 || salvage > purchase) return false;
+    return true;
+  }
+
+  // Non-depreciation item (direct cost, rental, labor, materials, overhead, etc.)
+  const amount = parseDecimalInput(item.amount, locale);
+  return amount !== null && amount >= 0;
+}
+
 export function buildCalculationRequest(draft: GuestDraft, locale = 'en') {
   const buckets = Object.entries(draft.buckets)
     .filter(([, bucket]) => !bucket.isNone && (
       bucket.totalSpent.trim() !== ''
-      || bucket.items.some((item) =>
-        item.name.trim()
-        && (
-          item.amount.trim()
-          || ['units', 'periods'].includes(item.details?.depreciation_method ?? '')
-        ),
-      )
+      || bucket.items.some((item) => isCalculableLineItem(item, locale))
     ))
     .map(([key, bucket]) => ({
       type: key,
@@ -146,62 +177,63 @@ export function buildCalculationRequest(draft: GuestDraft, locale = 'en') {
           : 2,
       hidden: false,
       items: bucket.items
-        .filter((item) =>
-          item.name.trim() !== ''
-          && (
-            item.amount.trim() !== ''
-            || ['units', 'periods'].includes(item.details?.depreciation_method ?? '')
-          ),
-        )
-        .map((item) => ({
-          name: item.name.trim(),
-          quantity: item.purchaseQuantity?.trim()
-            ? normalizeDecimalInput(item.purchaseQuantity, locale)
-            : '1',
-          ...(item.purchaseUnit?.trim() ? { unit: item.purchaseUnit.trim() } : {}),
-          ...(item.amount.trim()
-            ? { amount: normalizeDecimalInput(item.amount, locale) }
-            : {}),
-          units_covered: item.unitsCovered.trim()
-            ? normalizeDecimalInput(item.unitsCovered, locale)
-            : undefined,
-          is_imputed: item.isImputed ?? false,
-          ...(item.details?.cost_behavior
-            ? { cost_behavior: item.details.cost_behavior as 'variable' | 'fixed' }
-            : {}),
-          details: {
-            ...Object.fromEntries(
-              Object.entries(item.details ?? {})
-                .filter(([detailKey, value]) =>
-                  value.trim() !== ''
-                  && !(
-                    detailKey === 'amortization_units'
-                    && item.details?.amortization_method === 'none'
-                  ),
-                )
-                .map(([detailKey, value]) => [
-                  detailKey,
-                  detailKey.endsWith('_percentage')
-                    || detailKey.endsWith('_amount')
-                    || detailKey.endsWith('_units')
-                    || detailKey.endsWith('_price')
-                    || detailKey.endsWith('_measure')
-                    ? normalizeDecimalInput(value, locale)
-                    : value,
-                ]),
-            ),
-            ...(key === 'material' ? { source_item_id: item.id } : {}),
-          },
-        })),
+        .filter((item) => isCalculableLineItem(item, locale))
+        .map((item) => {
+          const depMethod = item.details?.depreciation_method ?? 'none';
+          return {
+            name: item.name.trim(),
+            quantity: item.purchaseQuantity?.trim()
+              ? normalizeDecimalInput(item.purchaseQuantity, locale)
+              : '1',
+            ...(item.purchaseUnit?.trim() ? { unit: item.purchaseUnit.trim() } : {}),
+            ...(item.amount.trim()
+              ? { amount: normalizeDecimalInput(item.amount, locale) }
+              : {}),
+            units_covered: item.unitsCovered.trim()
+              ? normalizeDecimalInput(item.unitsCovered, locale)
+              : undefined,
+            is_imputed: item.isImputed ?? false,
+            ...(item.details?.cost_behavior
+              ? { cost_behavior: item.details.cost_behavior as 'variable' | 'fixed' }
+              : {}),
+            details: {
+              ...Object.fromEntries(
+                Object.entries(item.details ?? {})
+                  .filter(([detailKey, value]) =>
+                    value.trim() !== ''
+                    && !(
+                      detailKey === 'amortization_units'
+                      && item.details?.amortization_method === 'none'
+                    )
+                    && !(
+                      (detailKey === 'lifetime_units' || detailKey === 'useful_life_periods')
+                      && depMethod === 'none'
+                    ),
+                  )
+                  .map(([detailKey, value]) => [
+                    detailKey,
+                    detailKey.endsWith('_percentage')
+                      || detailKey.endsWith('_amount')
+                      || detailKey.endsWith('_units')
+                      || detailKey.endsWith('_price')
+                      || detailKey.endsWith('_measure')
+                      ? normalizeDecimalInput(value, locale)
+                      : value,
+                  ]),
+              ),
+              ...(key === 'material' ? { source_item_id: item.id } : {}),
+            },
+          };
+        }),
     }));
 
   return {
-    unit_label: draft.unitLabel.trim(),
+    unit_label: draft.unitLabel.trim() || 'unit',
     units_produced: normalizeDecimalInput(draft.unitsProduced, locale),
     defective_units: draft.defectiveUnits.trim()
       ? normalizeDecimalInput(draft.defectiveUnits, locale)
       : '0',
-    default_units_covered_scope: draft.defaultUnitsCoveredScope,
+    default_units_covered_scope: draft.defaultUnitsCoveredScope || 'all',
     pricing_type: draft.pricingType,
     pricing_percentage: draft.pricingPercentage.trim()
       ? normalizeDecimalInput(draft.pricingPercentage, locale)
@@ -235,7 +267,7 @@ async function fetchApi<T>(
   const send = (token?: string) => {
     const requestHeaders = new Headers(headers);
     if (token) requestHeaders.set('Authorization', `Bearer ${token}`);
-    return fetch(`${API_BASE}${endpoint}`, {
+    return fetch(`${getApiBase()}${endpoint}`, {
       ...options,
       headers: requestHeaders,
     });
@@ -386,7 +418,7 @@ export function downloadVersionReport(
       throw new ApiError('Authentication required', 401);
     }
 
-    const endpoint = `${API_BASE}/cost-sheets/versions/${versionId}/export/${format}`;
+    const endpoint = `${getApiBase()}/cost-sheets/versions/${versionId}/export/${format}`;
     let response = await fetch(endpoint, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });

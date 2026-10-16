@@ -43,6 +43,7 @@ export function getActiveLevel3Count(item: LineItemDraft, bucketKey: string): nu
       if (item.details.depreciation_method && item.details.depreciation_method !== 'none') count++;
       if (item.details.purchase_price?.trim()) count++;
       if (item.details.salvage_value?.trim()) count++;
+      if (item.details.maintenance_cost_annual?.trim()) count++;
       if (item.details.lifetime_units?.trim() || item.details.useful_life_periods?.trim()) count++;
     } else if (bucketKey === 'custom_fees') {
       if (item.details.amortization_method && item.details.amortization_method !== 'none') count++;
@@ -291,6 +292,16 @@ function Level3Form({
                     prefix={currencyCode}
                     placeholder="0.00"
                   />
+                  <div className="sm:col-span-2">
+                    <DetailNumberInput
+                      id={`${prefix}-maintenance-cost`}
+                      label={t('detailLabels.maintenance_cost_annual')}
+                      value={details.maintenance_cost_annual ?? ''}
+                      onChange={(value) => updateDetail('maintenance_cost_annual', value)}
+                      prefix={currencyCode}
+                      placeholder="0.00"
+                    />
+                  </div>
                   {details.depreciation_method === 'units' ? (
                     <div className="sm:col-span-2">
                       <DetailNumberInput

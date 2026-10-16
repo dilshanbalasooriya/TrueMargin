@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { useServerInsertedHTML } from 'next/navigation';
 
 type Theme = 'light' | 'dark';
 
@@ -19,12 +20,26 @@ const STORAGE_KEY = 'theme';
 const THEME_CHANGE_EVENT = 'truemargin-theme-change';
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('${STORAGE_KEY}');var d=t==='dark';var el=document.documentElement;if(d){el.classList.add('dark');el.style.colorScheme='dark';}else{el.classList.remove('dark');el.style.colorScheme='light';}}catch(e){}})();`;
+
+// Suppress React 19 false-positive script warning in development
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    if (typeof args[0] === 'string' && args[0].includes('Encountered a script tag')) {
+      return;
+    }
+    originalError.apply(console, args);
+  };
+}
+
 function getThemeSnapshot(): Theme {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === 'dark') return 'dark';
-  if (stored === 'light') return 'light';
-  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
+  try {
+    const stored = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+    if (stored === 'dark') return 'dark';
+    if (stored === 'light') return 'light';
+  } catch {
+    // ignore
   }
   return 'light';
 }
@@ -48,6 +63,12 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  useServerInsertedHTML(() => (
+    <script
+      key="theme-init"
+      dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }}
+    />
+  ));
   const resolvedTheme = useSyncExternalStore(
     subscribeToThemeChanges,
     getThemeSnapshot,
@@ -59,9 +80,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [resolvedTheme]);
 
   const setTheme = (theme: Theme) => {
-    window.localStorage.setItem(STORAGE_KEY, theme);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(STORAGE_KEY, theme);
+      }
+    } catch {
+      // ignore
+    }
     applyTheme(theme);
-    window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+    }
   };
 
   return (

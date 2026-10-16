@@ -38,19 +38,27 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
           password,
           options: { data: { display_name: displayName, currency } },
         });
-        if (authError) setError(t('authError'));
-        else if (!data.session) setConfirmation(true);
-        else window.location.reload();
+        if (authError) {
+          setError(authError.message || t('authError'));
+        } else if (!data.session) {
+          setConfirmation(true);
+        } else {
+          window.location.reload();
+        }
       } else {
         const { error: authError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (authError) setError(t('authError'));
-        else window.location.reload();
+        if (authError) {
+          setError(authError.message || t('authError'));
+        } else {
+          window.location.reload();
+        }
       }
-    } catch {
-      setError(t('authError'));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : t('authError');
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -165,7 +173,18 @@ export function LoginModal({ children }: { children: React.ReactNode }) {
                 </>
               )}
             </div>
-            {error && <div className="text-destructive text-sm font-medium">{error}</div>}
+            {error && (
+              <div className="space-y-1">
+                <div className="text-destructive text-sm font-medium">{error}</div>
+                {error.toLowerCase().includes('invalid login credentials') && (
+                  <p className="text-xs text-muted-foreground">
+                    {locale === 'si'
+                      ? 'ගිණුමක් සාදා නැතිනම්, පහත ඇති "Sign up" ක්ලික් කර නව ගිණුමක් ලියාපදිංචි කරන්න.'
+                      : "If you don't have an account yet, click 'Sign up' below to create one."}
+                  </p>
+                )}
+              </div>
+            )}
             {confirmation && <div role="status" className="text-sm text-muted-foreground">{t('emailConfirmation')}</div>}
             
             <Button type="submit" className="min-h-11 font-medium" disabled={loading || !email || !password || (isSignUp && !displayName.trim())}>

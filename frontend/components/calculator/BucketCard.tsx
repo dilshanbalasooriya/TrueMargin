@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import {
   Plus,
@@ -29,6 +29,7 @@ import { cn } from 'cn';
 import type { BucketDraft, LineItemDraft } from '@/store/useCalculatorStore';
 import { Level3DetailsModal, getActiveLevel3Count } from './Level3DetailsModal';
 import { TransportCostEditor } from './TransportCostEditor';
+import { MachineryCostEditor, type MachineryPreset } from './MachineryCostEditor';
 import {
   calculateRecipeCoverageClient,
   areUnitsCompatible,
@@ -182,6 +183,7 @@ export function BucketCard({
   onToggleExpand,
 }: BucketCardProps) {
   const t = useTranslations('Calculator');
+  const locale = useLocale();
 
   // Accordion state: Controls whether the ENTIRE bucket is expanded or collapsed
   const isCardControlled = isExpandedProp !== undefined;
@@ -210,6 +212,7 @@ export function BucketCard({
   const isLabor = bucketKey === 'labor';
   const isOverhead = bucketKey === 'overhead';
   const isTransport = bucketKey === 'transport';
+  const isMachinery = bucketKey === 'machinery';
   const availableOverheadPresets = OVERHEAD_PRESETS.filter(
     (preset) => !bucket.items.some(
       (item) =>
@@ -355,20 +358,39 @@ export function BucketCard({
     };
     const nextItems = [...bucket.items, newItem];
     const nextSum = nextItems.reduce((acc, it) => acc + getItemEffectiveAmount(it), 0);
-    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
-    onChange({
-      items: nextItems,
-      ...(shouldSyncTotal
-        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
-        : {}),
-    });
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
+
     setCardExpanded(true);
     setIsLevel2(true);
     setActiveItemId(id);
   };
 
-  const handleAddIncomingTransportItem = (material: Pick<LineItemDraft, 'id' | 'name'>) => {
+  const handleAddIncomingTransportItem = (material?: Pick<LineItemDraft, 'id' | 'name'>, initialAmount?: string) => {
     const id =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -376,32 +398,51 @@ export function BucketCard({
     const batchUnits = bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '';
     const item: LineItemDraft = {
       id,
-      name: t('transportIncomingChargeName', { material: material.name }),
-      amount: '',
+      name: material ? t('transportIncomingChargeName', { material: material.name }) : t('transportIncomingUnallocatedName'),
+      amount: initialAmount ?? '',
       unitsCovered: batchUnits,
       isImputed: false,
       details: {
         direction: 'inbound',
-        allocated_material_ids: material.id,
+        ...(material ? { allocated_material_ids: material.id } : {}),
         cost_behavior: 'variable',
         variable_percentage: '100',
       },
     };
     const nextItems = [...bucket.items, item];
     const nextSum = nextItems.reduce((acc, current) => acc + getItemEffectiveAmount(current), 0);
-    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
-    onChange({
-      items: nextItems,
-      ...(shouldSyncTotal
-        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
-        : {}),
-    });
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
+
     setCardExpanded(true);
     setIsLevel2(true);
   };
 
-  const handleAddOutgoingTransportItem = (name = '', presetId?: string) => {
+  const handleAddOutgoingTransportItem = (name = '', presetId?: string, initialAmount?: string) => {
     const id =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -409,8 +450,8 @@ export function BucketCard({
     const batchUnits = bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '';
     const item: LineItemDraft = {
       id,
-      name,
-      amount: '',
+      name: name || t('transportOutgoingUnallocatedName'),
+      amount: initialAmount ?? '',
       unitsCovered: batchUnits,
       isImputed: false,
       details: {
@@ -423,14 +464,33 @@ export function BucketCard({
     };
     const nextItems = [...bucket.items, item];
     const nextSum = nextItems.reduce((acc, current) => acc + getItemEffectiveAmount(current), 0);
-    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
-    onChange({
-      items: nextItems,
-      ...(shouldSyncTotal
-        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
-        : {}),
-    });
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
+
     setCardExpanded(true);
     setIsLevel2(true);
   };
@@ -459,14 +519,33 @@ export function BucketCard({
     };
     const nextItems = [...bucket.items, newItem];
     const nextSum = nextItems.reduce((acc, it) => acc + getItemEffectiveAmount(it), 0);
-    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
 
-    onChange({
-      items: nextItems,
-      ...(shouldSyncTotal
-        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
-        : {}),
-    });
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
+
     setCardExpanded(true);
     setIsLevel2(true);
     setActiveItemId(id);
@@ -565,14 +644,32 @@ export function BucketCard({
       return acc + getItemEffectiveAmount(it);
     }, 0);
 
-    const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
 
-    onChange({
-      items: nextItems,
-      ...(shouldSyncTotal
-        ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
-        : {}),
-    });
     setCardExpanded(true);
     setIsLevel2(true);
     setActiveItemId(id); // Expand the new item for immediate typing
@@ -664,6 +761,133 @@ export function BucketCard({
   const handleDiscardUnallocated = () => {
     onChange({ totalSpent: itemSum > 0 ? itemSum.toFixed(2).replace(/\.00$/, '') : '' });
     setInitialEstimate(null);
+  };
+
+  const handleConvertUnallocatedToTransport = (direction: 'inbound' | 'outbound') => {
+    const amountStr = unallocatedCost.toFixed(2).replace(/\.00$/, '');
+    if (direction === 'inbound') {
+      handleAddIncomingTransportItem(undefined, amountStr);
+    } else {
+      handleAddOutgoingTransportItem('', undefined, amountStr);
+    }
+  };
+
+  const handleAddMachineryPreset = (preset: MachineryPreset) => {
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const newItem: LineItemDraft = {
+      id,
+      name: t(preset.nameKey),
+      amount: '',
+      unitsCovered: bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '',
+      isImputed: false,
+      details: {
+        machinery_preset_id: preset.id,
+        depreciation_method: preset.defaultMethod,
+        purchase_price: '',
+        salvage_value: '0',
+        ...(preset.defaultMethod === 'units' ? { lifetime_units: '' } : {}),
+        ...(preset.defaultMethod === 'periods' ? { useful_life_periods: '' } : {}),
+        cost_behavior: preset.defaultMethod === 'units' ? 'variable' : 'fixed',
+      },
+    };
+
+    const nextItems = [...bucket.items, newItem];
+    const nextSum = nextItems.reduce((acc, it) => acc + getItemEffectiveAmount(it), 0);
+
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
+
+    setCardExpanded(true);
+    setIsLevel2(true);
+    setActiveItemId(id);
+  };
+
+  const handleAddMachineryItem = (method: 'units' | 'periods' | 'none' = 'units', initialAmount?: string) => {
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const batchUnits = bucket.unitsCovered.trim() || monthlyUnits || defaultUnitsCovered || '';
+    const newItem: LineItemDraft = {
+      id,
+      name: initialAmount ? t('machineryUnallocatedName') : '',
+      amount: initialAmount ?? '',
+      unitsCovered: batchUnits,
+      isImputed: false,
+      details: {
+        depreciation_method: method,
+        purchase_price: initialAmount ?? '',
+        salvage_value: '0',
+        ...(method === 'units' ? { lifetime_units: '' } : {}),
+        ...(method === 'periods' ? { useful_life_periods: '' } : {}),
+        cost_behavior: method === 'units' ? 'variable' : 'fixed',
+      },
+    };
+
+    const nextItems = [...bucket.items, newItem];
+    const nextSum = nextItems.reduce((acc, it) => acc + getItemEffectiveAmount(it), 0);
+
+    if (bucket.items.length === 0) {
+      const val = parseFloat(bucket.totalSpent);
+      const hasPriorCost = !isNaN(val) && val > 0;
+      if (hasPriorCost) {
+        setInitialEstimate(val);
+        onChange({
+          items: nextItems,
+          totalSpent: bucket.totalSpent.trim(),
+        });
+      } else {
+        setInitialEstimate(null);
+        onChange({
+          items: nextItems,
+          ...(nextSum > 0 ? { totalSpent: nextSum.toFixed(2).replace(/\.00$/, '') } : {}),
+        });
+      }
+    } else {
+      const shouldSyncTotal = !hasInitialGuess || nextSum > (initialEstimate ?? 0);
+      onChange({
+        items: nextItems,
+        ...(shouldSyncTotal
+          ? { totalSpent: nextSum > 0 ? nextSum.toFixed(2).replace(/\.00$/, '') : '' }
+          : {}),
+      });
+    }
+
+    setCardExpanded(true);
+    setIsLevel2(true);
+    setActiveItemId(id);
+  };
+
+  const handleConvertUnallocatedToMachinery = () => {
+    const amountStr = unallocatedCost.toFixed(2).replace(/\.00$/, '');
+    handleAddMachineryItem('none', amountStr);
   };
 
   const handleAcknowledgeExceeded = () => {
@@ -787,33 +1011,42 @@ export function BucketCard({
   };
 
   /* ========================================================================= */
-  /* STATE 1: COLLAPSED BUCKET (Sleek Visual Summary Row)                      */
+  /* UNIFIED BUCKET CARD: Smooth 60fps Expand/Collapse + Focused State         */
   /* ========================================================================= */
-  if (!isCardExpanded) {
-    return (
+  return (
+    <article
+      id={`bucket-card-${bucketKey}`}
+      className={cn(
+        "group/card relative rounded-2xl border transition-all duration-300 ease-out",
+        isCardExpanded
+          ? "border-primary/60 bg-card shadow-lg shadow-primary/5 ring-2 ring-primary/20 z-10"
+          : bucket.isNone
+            ? "border-border/60 bg-muted/20 hover:bg-muted/30 opacity-75"
+            : "border-border/80 bg-card hover:border-primary/40 hover:bg-card/90 opacity-90 hover:opacity-100 shadow-2xs hover:shadow-xs"
+      )}
+    >
+      {/* Category Header: Clickable to toggle entire bucket */}
       <div
-        onClick={() => setCardExpanded(true)}
+        onClick={() => setCardExpanded(!isCardExpanded)}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            setCardExpanded(true);
+            setCardExpanded(!isCardExpanded);
           }
         }}
         className={cn(
-          "group relative flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 rounded-2xl border p-3 sm:px-4 sm:py-3.5 transition-all cursor-pointer shadow-2xs hover:shadow-xs hover:border-primary/50 select-none",
-          bucket.isNone
-            ? "border-border/60 bg-muted/20 hover:bg-muted/30 opacity-75"
-            : "border-border/80 bg-card hover:bg-muted/10"
+          "flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 cursor-pointer select-none rounded-2xl p-3 sm:px-4 sm:py-3.5 transition-colors",
+          isCardExpanded ? "hover:bg-muted/10" : "hover:bg-muted/15"
         )}
-        title={t('expandCategoryHint')}
+        title={isCardExpanded ? t('collapseCategoryHint') : t('expandCategoryHint')}
       >
-        {/* Left Side: Icon, Title, Status Badge, Metrics */}
+        {/* Left Side: Icon, Title, Status Badges, Preview Line */}
         <div className="flex items-center gap-3 min-w-0">
           <div
             className={cn(
-              "flex size-10 shrink-0 items-center justify-center rounded-xl border shadow-2xs transition-transform group-hover:scale-105",
+              "flex size-10 shrink-0 items-center justify-center rounded-xl border shadow-2xs transition-transform group-hover/card:scale-105",
               theme.bg,
               theme.border,
               theme.color
@@ -824,9 +1057,22 @@ export function BucketCard({
 
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm sm:text-base font-bold tracking-tight text-foreground group-hover:text-primary transition-colors truncate">
+              <h3 className={cn(
+                "font-bold tracking-tight transition-colors truncate",
+                isCardExpanded
+                  ? "text-sm sm:text-base text-foreground"
+                  : "text-sm sm:text-base text-foreground group-hover/card:text-primary"
+              )}>
                 {title}
               </h3>
+
+              {/* Active Editing Beacon Badge */}
+              {isCardExpanded && (
+                <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
+                  <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+                  <span>{locale === 'si' ? 'සංස්කරණය කරමින්' : 'Active'}</span>
+                </span>
+              )}
 
               {bucket.isNone ? (
                 <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground border border-border/60">
@@ -841,15 +1087,19 @@ export function BucketCard({
                   ⚡ {t('quickEstimate')}
                 </span>
               ) : (
-                <span className="shrink-0 rounded-full bg-muted/80 px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/50">
-                  {t('notEntered')}
-                </span>
+                !isCardExpanded && (
+                  <span className="shrink-0 rounded-full bg-muted/80 px-2 py-0.5 text-[10px] font-medium text-muted-foreground border border-border/50">
+                    {t('notEntered')}
+                  </span>
+                )
               )}
             </div>
 
-            {/* Metric preview line */}
+            {/* Metric preview line or category question */}
             <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap truncate mt-0.5">
-              {bucket.isNone ? (
+              {isCardExpanded ? (
+                <span className="truncate max-w-sm sm:max-w-md">{question}</span>
+              ) : bucket.isNone ? (
                 <span>{question}</span>
               ) : effectiveSpent > 0 ? (
                 <>
@@ -874,8 +1124,34 @@ export function BucketCard({
           </div>
         </div>
 
-        {/* Right Side: Total Cost & Expand Chevron */}
-        <div className="flex items-center gap-3 shrink-0 ml-auto sm:ml-0">
+        {/* Right Side: Total Cost & Expand/Collapse Controls */}
+        <div
+          className="flex items-center gap-2.5 shrink-0 ml-auto sm:ml-0"
+          onClick={(e) => {
+            if (isCardExpanded) {
+              e.stopPropagation();
+            }
+          }}
+        >
+          {/* Header Action: Skip category (Ban button) */}
+          {isCardExpanded && !bucket.isNone && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg border-border/80 bg-background px-2.5 sm:px-3 text-xs font-semibold text-foreground shadow-2xs hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive transition-all"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange({ isNone: true, totalSpent: '0', items: [] });
+              }}
+              title={t('skipCategory')}
+            >
+              <Ban className="size-3.5 sm:mr-1.5 text-muted-foreground" />
+              <span className="hidden sm:inline">{t('skipCategory')}</span>
+            </Button>
+          )}
+
+          {/* Total Cost Display (visible when spent > 0 and not marked as none) */}
           {effectiveSpent > 0 && !bucket.isNone && (
             <div className="text-right">
               <span className="text-[10px] text-muted-foreground block font-medium uppercase tracking-wider">Total</span>
@@ -885,130 +1161,71 @@ export function BucketCard({
             </div>
           )}
 
-          <div className="flex size-8 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-all shadow-2xs">
-            <ChevronDown className="size-4" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* ========================================================================= */
-  /* STATE 2: EXPANDED FULL BUCKET CARD                                        */
-  /* ========================================================================= */
-  return (
-    <article
-      className={cn(
-        "rounded-2xl border bg-card p-4 sm:p-5 transition-all shadow-2xs hover:shadow-xs",
-        bucket.isNone ? "border-border/60 bg-muted/15" : "border-border"
-      )}
-    >
-      {/* Category Header: Fully Clickable to Collapse the Entire Bucket */}
-      <div
-        onClick={() => setCardExpanded(false)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setCardExpanded(false);
-          }
-        }}
-        className="group flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none rounded-xl p-1 -m-1 hover:bg-muted/15 transition-colors"
-        title={t('collapseCategoryHint')}
-      >
-        <div className="flex items-center gap-3 min-w-0">
+          {/* Rotating Chevron Toggle Button */}
           <div
-            className={cn(
-              "flex size-10 shrink-0 items-center justify-center rounded-xl border shadow-2xs transition-transform group-hover:scale-105",
-              theme.bg,
-              theme.border,
-              theme.color
-            )}
-          >
-            <CategoryIcon className="size-5" />
-          </div>
-
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
-                {title}
-              </h3>
-              {hasItems && !bucket.isNone && (
-                <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                  {bucket.items.length} {bucket.items.length === 1 ? 'item' : 'items'}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground truncate max-w-sm sm:max-w-md">{question}</p>
-          </div>
-        </div>
-
-        {/* Header Actions: No-Cost Button and Full Category Collapse Button */}
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {!bucket.isNone && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-lg border-border/80 bg-background px-3 text-xs font-semibold text-foreground shadow-2xs hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive transition-all"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange({ isNone: true, totalSpent: '0', items: [] });
-              }}
-              title={t('skipCategory')}
-            >
-              <Ban className="size-3.5 mr-1.5 text-muted-foreground" />
-              <span>{t('skipCategory')}</span>
-            </Button>
-          )}
-
-          {/* Explicit Full Category Collapse Button */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground gap-1.5"
             onClick={(e) => {
-              e.stopPropagation();
-              setCardExpanded(false);
+              if (isCardExpanded) {
+                e.stopPropagation();
+                setCardExpanded(false);
+              }
             }}
-            title={t('collapseCategory')}
+            role="button"
+            tabIndex={-1}
+            className={cn(
+              "flex size-8 items-center justify-center rounded-lg transition-all shadow-2xs cursor-pointer",
+              isCardExpanded
+                ? "bg-primary/10 text-primary hover:bg-primary/20"
+                : "bg-muted/60 text-muted-foreground group-hover/card:bg-primary/10 group-hover/card:text-primary"
+            )}
+            title={isCardExpanded ? t('collapseCategory') : t('expandCategoryHint')}
           >
-            <ChevronUp className="size-3.5" />
-            <span>{t('collapseCategory')}</span>
-          </Button>
+            <ChevronDown
+              className={cn(
+                "size-4 transition-transform duration-300 ease-in-out",
+                isCardExpanded ? "rotate-180 text-primary" : "rotate-0"
+              )}
+            />
+          </div>
         </div>
       </div>
 
-      {bucket.isNone ? (
-        /* Marked as None */
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-dashed border-border/80 bg-muted/30 p-3.5">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              <Ban className="size-4" />
-            </span>
-            <span className="text-xs sm:text-sm font-medium text-muted-foreground">
-              {t('markedAsNoCost')}
-            </span>
-          </div>
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className="h-8 text-xs font-semibold shadow-2xs"
-            onClick={() => onChange({ isNone: false, totalSpent: '', items: [] })}
-          >
-            <Plus className="size-3.5 mr-1" />
-            {t('addCosts')}
-          </Button>
-        </div>
-      ) : (
-        <>
-          {/* LEVEL 1 VIEW: Streamlined, Orderly Input Grid */}
-          {!isLevel2 ? (
-            <div className="mt-4 space-y-4 pt-2 border-t border-border/60">
-              <div className="grid gap-4 sm:grid-cols-2">
+      {/* Hardware-Accelerated Collapsible Body via CSS Grid Row Animation */}
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out",
+          isCardExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0 pointer-events-none"
+        )}
+      >
+        <div className="overflow-hidden min-h-0">
+          <div className="border-t border-border/60 px-4 pb-4 pt-3 sm:px-5 sm:pb-5">
+            {bucket.isNone ? (
+              /* Marked as None */
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-border/80 bg-muted/30 p-3.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                    <Ban className="size-4" />
+                  </span>
+                  <span className="text-xs sm:text-sm font-medium text-muted-foreground">
+                    {t('markedAsNoCost')}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  className="h-8 text-xs font-semibold shadow-2xs"
+                  onClick={() => onChange({ isNone: false, totalSpent: '', items: [] })}
+                >
+                  <Plus className="size-3.5 mr-1" />
+                  {t('addCosts')}
+                </Button>
+              </div>
+            ) : (
+              <>
+                {/* LEVEL 1 VIEW: Streamlined, Orderly Input Grid */}
+                {!isLevel2 ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
                 {/* 1. Category Total Amount */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between min-h-6">
@@ -1107,6 +1324,10 @@ export function BucketCard({
                   className="h-8.5 px-3.5 text-xs font-semibold gap-1.5 shadow-2xs border-primary/40 hover:border-primary hover:bg-primary/5 text-primary"
                   onClick={() => {
                     setIsLevel2(true);
+                    const val = parseFloat(bucket.totalSpent);
+                    if (!isNaN(val) && val > 0) {
+                      setInitialEstimate(val);
+                    }
                     if (bucket.items.length > 0) {
                       const incomplete = bucket.items.find((it) => !it.name.trim() || !it.amount.trim());
                       setActiveItemId(incomplete?.id ?? null);
@@ -1127,7 +1348,7 @@ export function BucketCard({
             /* LEVEL 2 VIEW: Redesigned, Orderly Itemized Section */
             <div className="mt-4 space-y-4 pt-2 border-t border-border/60">
               {/* Estimation Reality Check Banner (Level 1 vs Level 2) */}
-              {hasInitialGuess && !isTransport && (
+              {hasInitialGuess && (bucket.items.length > 0 || isTransport || isMachinery) && (
                 <div className="rounded-xl border border-border/80 bg-gradient-to-br from-card to-muted/30 p-3 sm:p-3.5 space-y-2.5 shadow-2xs">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -1195,7 +1416,7 @@ export function BucketCard({
               )}
 
               {/* First-Time Category Method Question Prompt (Dismissed once answered) */}
-              {bucket.items.length === 0 && !isTransport && (
+              {bucket.items.length === 0 && !isTransport && !isMachinery && (
                 isOverhead ? (
                   <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/5 via-card to-background p-4 sm:p-5 space-y-3.5 shadow-2xs animate-in fade-in">
                     <div className="flex items-center gap-2">
@@ -1384,6 +1605,10 @@ export function BucketCard({
                   items={bucket.items}
                   materials={relatedMaterials}
                   currencyCode={currencyCode}
+                  batchUnits={parseFloat(bucket.unitsCovered || monthlyUnits || defaultUnitsCovered || '1') || 1}
+                  unitLabel={unitLabel}
+                  unallocatedCost={hasInitialGuess ? unallocatedCost : 0}
+                  onAllocateUnallocated={handleConvertUnallocatedToTransport}
                   onAddIncoming={handleAddIncomingTransportItem}
                   onAddOutgoing={handleAddOutgoingTransportItem}
                   onUpdate={updateItem}
@@ -1391,9 +1616,34 @@ export function BucketCard({
                 />
               )}
 
+              {isMachinery && (
+                <MachineryCostEditor
+                  items={bucket.items}
+                  currencyCode={currencyCode}
+                  batchUnits={parseFloat(bucket.unitsCovered || defaultUnitsCovered || '1') || 1}
+                  monthlyUnits={parseFloat(monthlyUnits || '1') || 1}
+                  unallocatedCost={hasInitialGuess ? unallocatedCost : 0}
+                  activeItemId={activeItemId}
+                  onSetActiveItem={setActiveItemId}
+                  onAllocateUnallocated={handleConvertUnallocatedToMachinery}
+                  onAddPreset={handleAddMachineryPreset}
+                  onAddItem={handleAddMachineryItem}
+                  onUpdate={updateItem}
+                  onRemove={removeItem}
+                  onOpenLevel3={(it) => setSelectedLevel3Item(it)}
+                />
+              )}
+
               {/* Quick Preset Chips for Overhead when items already exist */}
               {isOverhead && bucket.items.length > 0 && availableOverheadPresets.length > 0 && (
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <div
+                  onWheel={(e) => {
+                    if (e.deltaY !== 0) {
+                      e.currentTarget.scrollLeft += e.deltaY;
+                    }
+                  }}
+                  className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full touch-pan-x overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
                   <span className="text-[11px] font-bold text-muted-foreground shrink-0 uppercase tracking-wider">
                     {t('overheadQuickAddTitle')}:
                   </span>
@@ -1414,7 +1664,7 @@ export function BucketCard({
 
               {/* Guided Item Cards with Accordion/Compact Behavior */}
               <div className="space-y-3">
-                {(isTransport ? [] : bucket.items).map((item) => {
+                {(isTransport || isMachinery ? [] : bucket.items).map((item) => {
                   const index = bucket.items.indexOf(item);
                   const activeLevel3Count = getActiveLevel3Count(item, bucketKey);
                   const isItemExpanded = activeItemId === item.id;
@@ -3242,35 +3492,79 @@ export function BucketCard({
               </div>
 
               {/* Unallocated Cash Balance Tools */}
-              {hasInitialGuess && !isTransport && unallocatedCost > 0.01 && (
+              {hasInitialGuess && unallocatedCost > 0.01 && (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3 sm:p-3.5">
                   <div className="min-w-0">
                     <span className="text-xs font-bold text-foreground block">
                       {t('unallocatedBalanceTitle')}: {currencyCode} {unallocatedCost.toFixed(2)}
                     </span>
                     <span className="text-[11px] text-muted-foreground block">
-                      {t('unallocatedBalanceDesc', { initial: `${currencyCode} ${initialEstimate.toLocaleString()}` })}
+                      {isTransport
+                        ? t('unallocatedTransportPrompt', { initial: `${currencyCode} ${initialEstimate.toLocaleString()}` })
+                        : isMachinery
+                        ? t('machineryUnallocatedPrompt', { initial: `${currencyCode} ${initialEstimate.toLocaleString()}` })
+                        : t('unallocatedBalanceDesc', { initial: `${currencyCode} ${initialEstimate.toLocaleString()}` })}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-8 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs"
-                      onClick={handleConvertUnallocatedToItem}
-                      title={t('convertUnallocatedAction')}
-                    >
-                      <Plus className="size-3.5" />
-                      <span>{t('convertUnallocatedAction')}</span>
-                    </Button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isTransport ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer"
+                          onClick={() => handleConvertUnallocatedToTransport('inbound')}
+                          title={t('convertUnallocatedToIncoming')}
+                        >
+                          <Plus className="size-3.5" />
+                          <span>📥 {t('convertUnallocatedToIncoming')}</span>
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs border border-sky-500/30 text-sky-700 dark:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 cursor-pointer"
+                          onClick={() => handleConvertUnallocatedToTransport('outbound')}
+                          title={t('convertUnallocatedToOutgoing')}
+                        >
+                          <Plus className="size-3.5" />
+                          <span>📤 {t('convertUnallocatedToOutgoing')}</span>
+                        </Button>
+                      </>
+                    ) : isMachinery ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs border border-rose-500/30 text-rose-700 dark:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 cursor-pointer"
+                        onClick={handleConvertUnallocatedToMachinery}
+                        title={t('machineryConvertUnallocated')}
+                      >
+                        <Plus className="size-3.5" />
+                        <span>🔧 {t('machineryConvertUnallocated')}</span>
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 px-2.5 text-xs font-semibold gap-1.5 shadow-2xs"
+                        onClick={handleConvertUnallocatedToItem}
+                        title={t('convertUnallocatedAction')}
+                      >
+                        <Plus className="size-3.5" />
+                        <span>{t('convertUnallocatedAction')}</span>
+                      </Button>
+                    )}
 
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="h-8 px-2.5 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1.5"
+                      className="h-8 px-2.5 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1.5 cursor-pointer"
                       onClick={handleDiscardUnallocated}
                       title={t('discardUnallocatedAction')}
                     >
@@ -3282,22 +3576,42 @@ export function BucketCard({
               )}
 
               {/* Add Item Button (Shown when items exist; otherwise Question Prompt creates the first item) */}
-              {bucket.items.length > 0 && !isTransport && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 w-full sm:w-auto text-xs font-semibold border-dashed border-border/90 hover:border-primary/50 hover:bg-primary/5"
-                  onClick={isOverhead ? handleAddNewOverheadItem : addItem}
-                >
-                  <Plus className="size-3.5 mr-1.5" />
-                  {t('addLine')}
-                </Button>
+              {bucket.items.length > 0 && !isTransport && !isMachinery && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-full sm:w-auto text-xs font-semibold border-dashed border-border/90 hover:border-primary/50 hover:bg-primary/5"
+                    onClick={isOverhead ? handleAddNewOverheadItem : addItem}
+                  >
+                    <Plus className="size-3.5 mr-1.5" />
+                    {t('addLine')}
+                  </Button>
+                  {isOverhead && availableOverheadPresets.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1 sm:pt-0">
+                      {availableOverheadPresets.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleAddOverheadPreset(preset)}
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10 text-xs font-semibold text-purple-700 dark:text-purple-300 transition-all cursor-pointer shadow-2xs hover:scale-102 active:scale-98"
+                        >
+                          <span>{preset.icon}</span>
+                          <span>+{t(preset.nameKey)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
         </>
       )}
+          </div>
+        </div>
+      </div>
 
       {/* Level 3 Advanced Settings Pop-up Modal */}
       <Level3DetailsModal
