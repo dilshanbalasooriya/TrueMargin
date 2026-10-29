@@ -4,7 +4,7 @@ import type { BucketDraft, GuestDraft, LineItemDraft } from '@/store/useCalculat
 
 export function getApiBase(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined' && window.location.hostname) {
     return `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
@@ -338,7 +338,7 @@ export function calculateCostSheet(
 }
 
 export async function syncUserProfile(
-  registration?: { display_name?: string; currency?: string },
+  registration?: { display_name?: string; currency?: string; country?: string },
 ): Promise<UserProfile> {
   const supabase = createClient();
   const {
@@ -348,6 +348,7 @@ export async function syncUserProfile(
   const syncData = registration ?? {
     ...(typeof metadata.display_name === 'string' ? { display_name: metadata.display_name } : {}),
     ...(typeof metadata.currency === 'string' ? { currency: metadata.currency.toUpperCase() } : {}),
+    ...(typeof metadata.country === 'string' ? { country: metadata.country } : {}),
   };
   return fetchApi<UserProfile>(
     '/auth/sync',
@@ -363,6 +364,7 @@ export async function saveCostSheet(
   draft: GuestDraft,
   workspaceId: string,
   locale = 'en',
+  changeNote?: string,
 ): Promise<CostSheet | SavedVersion> {
   const calculationData = buildCalculationRequest(draft, locale);
 
@@ -372,6 +374,7 @@ export async function saveCostSheet(
       {
         method: 'POST',
         body: JSON.stringify({
+          change_note: changeNote?.trim() ? changeNote.trim() : undefined,
           currency_code: draft.currencyCode,
           calculation_data: calculationData,
         }),
@@ -408,6 +411,7 @@ export function listCostSheets(workspaceId: string): Promise<CostSheet[]> {
 export function downloadVersionReport(
   versionId: string,
   format: 'csv' | 'pdf',
+  locale = 'en',
 ): Promise<Blob> {
   return (async () => {
     const supabase = createClient();
@@ -418,7 +422,7 @@ export function downloadVersionReport(
       throw new ApiError('Authentication required', 401);
     }
 
-    const endpoint = `${getApiBase()}/cost-sheets/versions/${versionId}/export/${format}`;
+    const endpoint = `${getApiBase()}/cost-sheets/versions/${versionId}/export/${format}?locale=${encodeURIComponent(locale)}`;
     let response = await fetch(endpoint, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
@@ -484,6 +488,27 @@ export interface SheetVersionDetail {
   }>;
 }
 
+export interface SheetVersionSummary {
+  id: string;
+  version_number: number;
+  change_note?: string | null;
+  units_produced: string | number;
+  defective_units: string | number;
+  good_units: string | number;
+  total_cost: string | number;
+  unit_cost: string | number;
+  currency_code: string;
+  created_at: string;
+}
+
+export function listSheetVersions(sheetId: string): Promise<SheetVersionSummary[]> {
+  return fetchApi<SheetVersionSummary[]>(
+    `/cost-sheets/${sheetId}/versions`,
+    {},
+    true,
+  );
+}
+
 export function getVersionDetail(versionId: string): Promise<SheetVersionDetail> {
   return fetchApi<SheetVersionDetail>(
     `/cost-sheets/versions/${versionId}`,
@@ -538,6 +563,7 @@ export function loadSheetVersionIntoDraft(
     buckets,
     sheetId: sheet.id,
     versionId: detail.id,
+    versionNumber: detail.version_number,
     workspaceId: sheet.workspace_id,
   };
 }

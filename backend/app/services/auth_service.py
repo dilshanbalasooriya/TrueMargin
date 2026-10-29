@@ -68,8 +68,8 @@ class AuthService:
             profile = Profile(
                 id=user_id,
                 display_name=payload.display_name,
-                country=payload.country,
-                currency=payload.currency or "LKR",
+                country=payload.country or settings.DEFAULT_COUNTRY,
+                currency=payload.currency or settings.DEFAULT_CURRENCY,
             )
             db.add(profile)
 
@@ -77,8 +77,8 @@ class AuthService:
             default_workspace = Workspace(
                 owner_id=user_id,
                 name=f"{payload.display_name}'s Workspace",
-                country=payload.country or "LK",
-                currency=payload.currency or "LKR",
+                country=payload.country or settings.DEFAULT_COUNTRY,
+                currency=payload.currency or settings.DEFAULT_CURRENCY,
             )
             db.add(default_workspace)
             db.flush()  # Generates default_workspace.id
@@ -180,18 +180,20 @@ class AuthService:
         db: Session,
         display_name: Optional[str] = None,
         currency: Optional[str] = None,
+        country: Optional[str] = None,
     ) -> UserProfileResponse:
-        """Called by the frontend after Supabase native login to ensure Profile and Workspace exist."""
+        """Called by the frontend after Supabase native login to ensure Profile and Workspace exist, or to update existing profile attributes."""
         profile = db.get(Profile, user_id)
         if not profile:
             try:
                 # Bootstrap profile and workspace for users who logged in via OAuth/Magic Link
                 resolved_name = display_name or email.split('@')[0]
-                resolved_currency = currency or "LKR"
+                resolved_currency = currency or settings.DEFAULT_CURRENCY
+                resolved_country = country or settings.DEFAULT_COUNTRY
                 profile = Profile(
                     id=user_id,
                     display_name=resolved_name,
-                    country="LK",
+                    country=resolved_country,
                     currency=resolved_currency,
                 )
                 db.add(profile)
@@ -199,7 +201,7 @@ class AuthService:
                 default_workspace = Workspace(
                     owner_id=user_id,
                     name=f"{resolved_name}'s Workspace",
-                    country="LK",
+                    country=resolved_country,
                     currency=resolved_currency,
                 )
                 db.add(default_workspace)
@@ -211,7 +213,23 @@ class AuthService:
             except Exception as e:
                 db.rollback()
                 raise HTTPException(status_code=500, detail=f"Failed to sync user: {str(e)}")
+        else:
+            updated = False
+            if display_name and display_name.strip() and display_name.strip() != profile.display_name:
+                profile.display_name = display_name.strip()
+                updated = True
+            if currency and currency.strip() and currency.strip().upper() != profile.currency:
+                profile.currency = currency.strip().upper()
+                updated = True
+            if country and country.strip() and country.strip() != profile.country:
+                profile.country = country.strip()
+                updated = True
+            if updated:
+                db.add(profile)
+                db.commit()
+                db.refresh(profile)
         
         return self.get_user_profile(user_id, db)
+
 
 auth_service = AuthService()

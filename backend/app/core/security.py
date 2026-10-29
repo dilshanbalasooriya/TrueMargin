@@ -12,8 +12,8 @@ def verify_supabase_jwt(token: str) -> Dict[str, Any]:
         payload = jwt.decode(
             token,
             settings.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
+            algorithms=[settings.SUPABASE_JWT_ALGORITHM],
+            audience=settings.SUPABASE_JWT_AUDIENCE,
         )
         return payload
     except jwt.ExpiredSignatureError:

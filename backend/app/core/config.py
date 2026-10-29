@@ -31,6 +31,34 @@ class Settings(BaseSettings):
         default="",
         description="Allowed CORS origins as a comma-separated list, e.g. http://localhost:3000,http://localhost:5173",
     )
+    ALLOW_ORIGIN_REGEX: str | None = Field(
+        default=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
+        description="Regex pattern for dynamically allowed origins in CORS (e.g. local IP testing)",
+    )
+
+    # Database Pool & Engine Configuration
+    DB_POOL_SIZE: int = Field(default=10, description="Database connection pool size")
+    DB_MAX_OVERFLOW: int = Field(default=20, description="Database pool max overflow connections")
+    DB_ECHO: bool | None = Field(
+        default=None,
+        description="SQLAlchemy echo SQL queries (defaults to True in development)",
+    )
+
+    # Supabase JWT Verification Settings
+    SUPABASE_JWT_ALGORITHM: str = Field(default="HS256", description="Supabase JWT token algorithm")
+    SUPABASE_JWT_AUDIENCE: str = Field(default="authenticated", description="Supabase JWT expected audience")
+
+    # Application & API Routing Settings
+    PROJECT_NAME: str = Field(default="Unit Cost SaaS API", description="FastAPI project name")
+    PROJECT_VERSION: str = Field(default="1.0.0", description="API version")
+    API_V1_PREFIX: str = Field(default="/api/v1", description="API v1 prefix")
+    DOCS_URL: str | None = Field(default="/docs", description="Interactive API docs endpoint")
+    REDOC_URL: str | None = Field(default="/redoc", description="ReDoc endpoint")
+    OPENAPI_URL: str | None = Field(default="/openapi.json", description="OpenAPI schema endpoint")
+
+    # Workspace & Localization Defaults
+    DEFAULT_CURRENCY: str = Field(default="LKR", description="Default workspace currency")
+    DEFAULT_COUNTRY: str = Field(default="LK", description="Default workspace country")
 
     @field_validator("SUPABASE_URL", mode="before")
     @classmethod

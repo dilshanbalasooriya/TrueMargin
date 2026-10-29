@@ -4,15 +4,18 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { BucketCard } from '@/components/calculator/BucketCard';
 import { CostSheetSetup } from '@/components/calculator/CostSheetSetup';
+import { HeroBanner } from '@/components/calculator/HeroBanner';
 import { MobileResultBar } from '@/components/calculator/MobileResultBar';
 import { ResultsPanel } from '@/components/calculator/ResultsPanel';
+import { SaveVersionModal } from '@/components/calculator/SaveVersionModal';
+import { Button } from '@/components/ui/button';
 import { ApiError, calculateCostSheet, downloadVersionReport, isCalculableLineItem, saveCostSheet, syncUserProfile } from '@/lib/api-client';
 import { isValidCurrencyCode } from '@/lib/currencies';
 import { parseDecimalInput } from '@/lib/numbers';
 import { useCalculatorStore } from '@/store/useCalculatorStore';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { toast } from '@/store/useToast';
-import { Lock, PieChart, Zap, Ban } from 'lucide-react';
+import { Lock, PieChart, Zap, Ban, GitCommitVertical, Plus } from 'lucide-react';
 import { cn } from 'cn';
 import type { CalculationResult } from '@/lib/api-client';
 import type { BucketDraft, GuestDraft } from '@/store/useCalculatorStore';
@@ -113,6 +116,7 @@ export function CalculatorPage() {
   const locale = useLocale();
   const pageT = useTranslations('Index');
   const t = useTranslations('Calculator');
+  const sheetsT = useTranslations('Sheets');
   const {
     draft,
     hydrated,
@@ -123,6 +127,7 @@ export function CalculatorPage() {
     setIsDirty,
     markClean,
     resetCount,
+    resetDraft,
   } = useCalculatorStore();
   const { user } = useAuth();
 
@@ -131,6 +136,7 @@ export function CalculatorPage() {
   const [calculationError, setCalculationError] = useState<CalculationError | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [versionModalOpen, setVersionModalOpen] = useState(false);
   const [expandedBucketKey, setExpandedBucketKey] = useState<string | null>(() => {
     const isComplete = Boolean(
       draft.productName.trim() &&
@@ -361,7 +367,7 @@ export function CalculatorPage() {
   const visibleError = inputHasError ? 'invalid' : calculationError;
   const visibleLoading = loading && started && answered && draftCalculable;
 
-  const save = async () => {
+  const handleSaveClick = () => {
     if (!user) {
       toast.error(t('saveNeedsLogin'));
       return;
@@ -371,6 +377,15 @@ export function CalculatorPage() {
       return;
     }
     if (!visibleResult || !draftCalculable || visibleLoading) return;
+
+    if (draft.sheetId) {
+      setVersionModalOpen(true);
+    } else {
+      void performSave();
+    }
+  };
+
+  const performSave = async (changeNote?: string) => {
     setSaving(true);
     try {
       let workspaceId = draft.workspaceId;
@@ -380,23 +395,31 @@ export function CalculatorPage() {
       }
       if (!workspaceId) throw new Error('No workspace is available for this account.');
 
-      const savedSheet = await saveCostSheet(draft, workspaceId, locale);
+      const savedSheet = await saveCostSheet(draft, workspaceId, locale, changeNote);
       if ('current_version_id' in savedSheet) {
         updateDraft({
           sheetId: savedSheet.id,
           versionId: savedSheet.current_version_id ?? undefined,
           workspaceId: savedSheet.workspace_id,
+          versionNumber: 1,
         });
+        toast.success(t('saveSuccess'));
       } else {
         updateDraft({
           sheetId: savedSheet.sheet_id,
           versionId: savedSheet.id,
           workspaceId,
+          versionNumber: savedSheet.version_number,
         });
+        toast.success(
+          sheetsT('saveSuccessNewVersion', {
+            version: savedSheet.version_number,
+          }),
+        );
       }
       markClean();
       setSaved(true);
-      toast.success(t('saveSuccess'));
+      setVersionModalOpen(false);
       window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'save' } }));
     } catch (error: unknown) {
       if (error instanceof ApiError && error.status === 401) {
@@ -415,7 +438,7 @@ export function CalculatorPage() {
       return;
     }
     try {
-      const blob = await downloadVersionReport(draft.versionId, 'csv');
+      const blob = await downloadVersionReport(draft.versionId, 'csv', locale);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -440,7 +463,7 @@ export function CalculatorPage() {
       return;
     }
     try {
-      const blob = await downloadVersionReport(draft.versionId, 'pdf');
+      const blob = await downloadVersionReport(draft.versionId, 'pdf', locale);
       const url = URL.createObjectURL(blob);
       reportWindow.location.href = url;
     } catch {
@@ -463,7 +486,7 @@ export function CalculatorPage() {
     pricingPercentage: draft.pricingPercentage,
     buckets: draft.buckets,
     onPricingChange: changeDraft,
-    onSave: () => void save(),
+    onSave: () => handleSaveClick(),
     onDownloadCsv: () => void downloadCsv(),
     onPrint: () => void printReport(),
   };
@@ -471,30 +494,51 @@ export function CalculatorPage() {
   return (
     <>
       <main className="mx-auto w-full max-w-7xl px-4 pb-32 pt-6 sm:px-6 sm:pb-12 sm:pt-8 lg:px-8">
-        {/* Simple & Focused Hero Section */}
-        <div className="mb-6 space-y-3">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl sm:leading-9">
-            {pageT('title')}
-          </h1>
+        {/* Rich Hero Banner matching user specification */}
+        <HeroBanner />
 
-          {/* Visual 3-step guide showing the purpose of this application at a glance */}
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/80 px-2.5 py-1.5 text-foreground/90 font-medium shadow-2xs">
-              <span className="size-1.5 rounded-full bg-blue-500" />
-              {locale === 'si' ? '1. වියදම් ඇතුළත් කරන්න' : '1. Enter Costs'}
-            </span>
-            <span className="text-muted-foreground/40 hidden sm:inline">→</span>
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/80 px-2.5 py-1.5 text-foreground/90 font-medium shadow-2xs">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              {locale === 'si' ? '2. නියම ඒකක පිරිවැය' : '2. Real Unit Cost'}
-            </span>
-            <span className="text-muted-foreground/40 hidden sm:inline">→</span>
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/80 px-2.5 py-1.5 text-foreground/90 font-medium shadow-2xs">
-              <span className="size-1.5 rounded-full bg-amber-500" />
-              {locale === 'si' ? '3. ලාභය සහිත විකුණුම් මිල' : '3. Profitable Price'}
-            </span>
+        {/* Existing Sheet Editing Banner */}
+        {draft.sheetId && (
+          <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs">
+                <GitCommitVertical className="size-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-foreground">
+                    {sheetsT('editingExisting', {
+                      name: draft.productName.trim() || 'Cost Sheet',
+                      version: draft.versionNumber ?? 1,
+                    })}
+                  </p>
+                  <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold text-primary">
+                    v{draft.versionNumber ?? 1}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {locale === 'si'
+                    ? 'ඔබ දැනට සුරැකි පත්‍රයක් සංස්කරණය කරයි. සුරැකීමෙන් නව සංශෝධනයක් එක්වේ.'
+                    : 'You are editing an existing sheet. Saving will create a new version with history tracking.'}
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                resetDraft();
+                setResult(null);
+                toast.info(sheetsT('discardEdit'));
+              }}
+              className="shrink-0 gap-1.5 self-start sm:self-auto border-border bg-card hover:bg-muted text-xs font-medium"
+            >
+              <Plus className="size-3.5" />
+              {sheetsT('discardEdit')}
+            </Button>
           </div>
-        </div>
+        )}
 
         <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_28rem] xl:grid-cols-[minmax(0,1fr)_30rem] lg:gap-8">
           <div className="min-w-0 space-y-8">
@@ -640,6 +684,15 @@ export function CalculatorPage() {
       </main>
 
       <MobileResultBar {...resultProps} />
+
+      <SaveVersionModal
+        open={versionModalOpen}
+        onOpenChange={setVersionModalOpen}
+        sheetName={draft.productName.trim() || 'Cost Sheet'}
+        onSave={performSave}
+        saving={saving}
+        currentVersionNumber={draft.versionNumber}
+      />
     </>
   );
 }

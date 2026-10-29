@@ -9,6 +9,7 @@ import { useSidebarStore } from '@/store/useSidebarStore';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/components/app/ThemeProvider';
 import { createClient } from '@/lib/supabase/client';
+import { toast } from '@/store/useToast';
 import {
   ChevronDown,
   FileText,
@@ -42,6 +43,15 @@ export function AppHeader() {
 
   const switchLocale = (targetLocale: 'en' | 'si') => {
     if (locale === targetLocale) return;
+    if (typeof document !== 'undefined') {
+      const currentTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+      document.cookie = `truemargin-theme=${currentTheme}; path=/; max-age=31536000; SameSite=Lax`;
+      document.cookie = `theme=${currentTheme}; path=/; max-age=31536000; SameSite=Lax`;
+      try {
+        localStorage.setItem('truemargin-theme', currentTheme);
+        localStorage.setItem('theme', currentTheme);
+      } catch {}
+    }
     router.replace(pathname, { locale: targetLocale });
   };
 
@@ -54,6 +64,8 @@ export function AppHeader() {
       setSignOutError(true);
       return;
     }
+    toast.persist('success', t('signOutSuccess'));
+    toast.success(t('signOutSuccess'));
     router.replace('/');
     router.refresh();
   };
@@ -127,22 +139,37 @@ export function AppHeader() {
               </button>
             </div>
 
-            {/* Dark / Light Mode Toggle */}
+            {/* Dark / Light Mode Toggle with smooth flowing animation */}
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="size-9 rounded-lg hover:bg-muted transition-all"
+              className="size-9 rounded-lg hover:bg-muted active:scale-90 transition-transform relative overflow-hidden"
               onClick={() => setTheme(dark ? 'light' : 'dark')}
               aria-label={t('theme')}
               title={dark ? t('lightMode') : t('darkMode')}
               suppressHydrationWarning
             >
-              {dark ? (
-                <Sun className="size-4.5 text-amber-400 transition-transform duration-200 rotate-0 hover:rotate-45" aria-hidden="true" />
-              ) : (
-                <Moon className="size-4.5 text-slate-700 dark:text-slate-300 transition-transform duration-200 rotate-0 hover:-rotate-12" aria-hidden="true" />
-              )}
+              <span className="relative flex size-4.5 items-center justify-center">
+                <Sun
+                  className={cn(
+                    "size-4.5 text-amber-400 absolute transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+                    dark
+                      ? "rotate-0 scale-100 opacity-100"
+                      : "-rotate-90 scale-0 opacity-0 pointer-events-none"
+                  )}
+                  aria-hidden="true"
+                />
+                <Moon
+                  className={cn(
+                    "size-4.5 text-slate-700 dark:text-slate-300 absolute transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+                    dark
+                      ? "rotate-90 scale-0 opacity-0 pointer-events-none"
+                      : "rotate-0 scale-100 opacity-100"
+                  )}
+                  aria-hidden="true"
+                />
+              </span>
             </Button>
 
             {/* Auth: User Profile or Sign In */}

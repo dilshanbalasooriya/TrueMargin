@@ -30,15 +30,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Unit Cost SaaS API",
+    title=settings.PROJECT_NAME,
     description=(
         "Accounting-grade product & service unit costing backend engine with "
         "reconciliation rules, versioning, workspace libraries, and CSV/PDF export generation."
     ),
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    version=settings.PROJECT_VERSION,
+    docs_url=settings.DOCS_URL,
+    redoc_url=settings.REDOC_URL,
+    openapi_url=settings.OPENAPI_URL,
     lifespan=lifespan,
 )
 
@@ -49,14 +49,16 @@ allowed_origins = (
     else ["http://localhost:3000", "http://localhost:5173"]
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+cors_middleware_kwargs = {
+    "allow_origins": allowed_origins,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if settings.ALLOW_ORIGIN_REGEX:
+    cors_middleware_kwargs["allow_origin_regex"] = settings.ALLOW_ORIGIN_REGEX
+
+app.add_middleware(CORSMiddleware, **cors_middleware_kwargs)
 
 
 # Health Check Endpoint
@@ -75,10 +77,8 @@ def health_check():
 
 
 # Router Registrations
-API_V1_PREFIX = "/api/v1"
-
-app.include_router(auth.router, prefix=API_V1_PREFIX)
-app.include_router(calculation.router, prefix=API_V1_PREFIX)
-app.include_router(cost_sheets.router, prefix=API_V1_PREFIX)
-app.include_router(libraries.router, prefix=API_V1_PREFIX)
-app.include_router(exports.router, prefix=API_V1_PREFIX)
+app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(calculation.router, prefix=settings.API_V1_PREFIX)
+app.include_router(cost_sheets.router, prefix=settings.API_V1_PREFIX)
+app.include_router(libraries.router, prefix=settings.API_V1_PREFIX)
+app.include_router(exports.router, prefix=settings.API_V1_PREFIX)

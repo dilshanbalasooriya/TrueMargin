@@ -1,5 +1,17 @@
-venv
+# Python virtual environment
+.venv/
+venv/
+
+# Environment files
 .env
-env.*
-.vscode
-__pycache__
+.env.*
+!.env.example
+
+# IDE & Cache
+.vscode/
+__pycache__/
+*.py[cod]
+
+# Local database
+*.db
+*.sqlite3

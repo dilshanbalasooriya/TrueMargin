@@ -1,11 +1,32 @@
 'use client';
 
+import { useEffect } from 'react';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { useToastStore } from '@/store/useToast';
 
 export function Toaster() {
   const toasts = useToastStore((s) => s.toasts);
   const dismissToast = useToastStore((s) => s.dismissToast);
+
+  // Restore any persisted toast (e.g. from post-login, post-logout or reload)
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('truemargin_toast');
+      if (stored) {
+        sessionStorage.removeItem('truemargin_toast');
+        const parsed = JSON.parse(stored);
+        if (parsed?.message) {
+          useToastStore.getState().addToast({
+            type: parsed.type || 'info',
+            message: parsed.message,
+            title: parsed.title,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   if (toasts.length === 0) return null;
 

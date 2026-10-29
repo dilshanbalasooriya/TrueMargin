@@ -54,4 +54,16 @@ export const toast = {
   dismiss: (id: string) => {
     useToastStore.getState().dismissToast(id);
   },
+  persist: (type: 'success' | 'error' | 'info', message: string, title?: string) => {
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          'truemargin_toast',
+          JSON.stringify({ type, message, title }),
+        );
+      }
+    } catch {
+      // ignore
+    }
+  },
 };

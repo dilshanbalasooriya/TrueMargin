@@ -3,13 +3,16 @@ import createNextIntlPlugin from 'next-intl/plugin';
 
 const withNextIntl = createNextIntlPlugin();
 
+const envAllowedDevOrigins = process.env.ALLOWED_DEV_ORIGINS
+  ? process.env.ALLOWED_DEV_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : [];
+
+const defaultDevOrigins = ['localhost', '127.0.0.1'];
+const allowedDevOrigins = Array.from(new Set([...defaultDevOrigins, ...envAllowedDevOrigins]));
+
 const nextConfig: NextConfig = {
   /* config options here */
-  allowedDevOrigins: [
-    '192.168.1.73',
-    'localhost',
-    '127.0.0.1',
-  ],
+  allowedDevOrigins,
   turbopack: {
     rules: {
       "*.css": {

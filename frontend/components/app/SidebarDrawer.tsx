@@ -6,7 +6,9 @@ import { useRouter, usePathname, Link } from '@/i18n/routing';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { LoginModal } from '@/components/auth/LoginModal';
 import { UnsavedChangesModal } from '@/components/app/UnsavedChangesModal';
+import { DeleteConfirmModal } from '@/components/sheets/DeleteConfirmModal';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/store/useToast';
 import {
   deleteCostSheet,
   getVersionDetail,
@@ -45,6 +47,7 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [loadingSheetId, setLoadingSheetId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sheetToDelete, setSheetToDelete] = useState<CostSheet | null>(null);
 
   const userId = user?.id;
   const loadingSheets = Boolean(open && userId && loadedUserId !== userId);
@@ -160,10 +163,14 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
     });
   };
 
-  const handleDeleteSheet = async (e: React.MouseEvent, sheetId: string) => {
+  const handleDeleteSheet = async (e: React.MouseEvent, sheet: CostSheet) => {
     e.stopPropagation();
-    if (!window.confirm(t('deleteConfirm'))) return;
+    setSheetToDelete(sheet);
+  };
 
+  const handleConfirmDeleteSheet = async () => {
+    if (!sheetToDelete) return;
+    const sheetId = sheetToDelete.id;
     setDeletingId(sheetId);
     try {
       await deleteCostSheet(sheetId);
@@ -171,9 +178,11 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
       if (draft.sheetId === sheetId) {
         resetDraft();
       }
+      toast.success(t('deleteSuccess'));
       window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'delete', sheetId } }));
+      setSheetToDelete(null);
     } catch {
-      alert(t('deleteError'));
+      toast.error(t('deleteError'));
     } finally {
       setDeletingId(null);
     }
@@ -181,6 +190,8 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
 
   const handleSignOut = async () => {
     await createClient().auth.signOut();
+    toast.persist('success', t('signOutSuccess'));
+    toast.success(t('signOutSuccess'));
     router.replace('/');
     router.refresh();
     onClose();
@@ -262,9 +273,22 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
                 </div>
 
                 {loadingSheets ? (
-                  <div className="flex min-h-24 items-center justify-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin text-primary" aria-hidden="true" />
-                    <span>Loading...</span>
+                  <div className="space-y-1 py-1" aria-label="Loading saved calculations">
+                    {[1, 2, 3].map((i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between gap-2 px-2 py-2 rounded-md border border-border/40 bg-muted/20 animate-pulse"
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <div className="size-1.5 rounded-full bg-muted-foreground/30 shrink-0" />
+                          <div
+                            className="h-2.5 rounded-md bg-muted-foreground/20"
+                            style={{ width: i === 1 ? '60%' : i === 2 ? '75%' : '50%' }}
+                          />
+                        </div>
+                        <div className="h-2.5 w-12 rounded-md bg-muted-foreground/20 shrink-0" />
+                      </div>
+                    ))}
                   </div>
                 ) : sheets.length === 0 ? (
                   <div className="px-2.5 py-4 text-center">
@@ -309,14 +333,15 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
                             )}
                             <button
                               type="button"
-                              className="size-5 rounded text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-destructive flex items-center justify-center transition-opacity"
-                              onClick={(e) => void handleDeleteSheet(e, sheet.id)}
+                              className="size-7 rounded-lg text-muted-foreground/40 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 hover:text-destructive hover:bg-destructive/10 active:scale-95 flex items-center justify-center transition-all cursor-pointer shrink-0"
+                              onClick={(e) => void handleDeleteSheet(e, sheet)}
                               title={t('deleteSheet')}
+                              aria-label={t('deleteSheet')}
                             >
                               {isDeletingThis ? (
-                                <Loader2 className="size-3 animate-spin" />
+                                <Loader2 className="size-3.5 animate-spin" />
                               ) : (
-                                <Trash2 className="size-3" />
+                                <Trash2 className="size-3.5" />
                               )}
                             </button>
                           </div>
@@ -393,6 +418,15 @@ export function SidebarDrawer({ open, onClose }: SidebarDrawerProps) {
             setPendingAction(null);
           }
         }}
+      />
+
+      {/* Modern Custom Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        open={Boolean(sheetToDelete)}
+        onOpenChange={(isOpen) => !isOpen && setSheetToDelete(null)}
+        sheetName={sheetToDelete?.name || ''}
+        deleting={Boolean(sheetToDelete && deletingId === sheetToDelete.id)}
+        onConfirm={handleConfirmDeleteSheet}
       />
     </>
   );

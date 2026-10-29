@@ -6,6 +6,7 @@ import { useRouter, usePathname, Link } from '@/i18n/routing';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { LoginModal } from '@/components/auth/LoginModal';
 import { UnsavedChangesModal } from '@/components/app/UnsavedChangesModal';
+import { DeleteConfirmModal } from '@/components/sheets/DeleteConfirmModal';
 import { Button } from '@/components/ui/button';
 import {
   deleteCostSheet,
@@ -68,6 +69,7 @@ export function AppSidebar() {
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
   const [loadingSheetId, setLoadingSheetId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sheetToDelete, setSheetToDelete] = useState<CostSheet | null>(null);
 
   const userId = user?.id;
   const loadingSheets = Boolean(userId && loadedUserId !== userId);
@@ -183,10 +185,14 @@ export function AppSidebar() {
     });
   };
 
-  const handleDeleteSheet = async (e: React.MouseEvent, sheetId: string) => {
+  const handleDeleteSheet = async (e: React.MouseEvent, sheet: CostSheet) => {
     e.stopPropagation();
-    if (!window.confirm(t('deleteConfirm'))) return;
+    setSheetToDelete(sheet);
+  };
 
+  const handleConfirmDeleteSheet = async () => {
+    if (!sheetToDelete) return;
+    const sheetId = sheetToDelete.id;
     setDeletingId(sheetId);
     try {
       await deleteCostSheet(sheetId);
@@ -196,6 +202,7 @@ export function AppSidebar() {
       }
       toast.success(t('deleteSuccess'));
       window.dispatchEvent(new CustomEvent('truemargin-sheets-updated', { detail: { action: 'delete', sheetId } }));
+      setSheetToDelete(null);
     } catch {
       toast.error(t('deleteError'));
     } finally {
@@ -205,6 +212,8 @@ export function AppSidebar() {
 
   const handleSignOut = async () => {
     await createClient().auth.signOut();
+    toast.persist('success', t('signOutSuccess'));
+    toast.success(t('signOutSuccess'));
     router.replace('/');
     router.refresh();
     setMobileOpen(false);
@@ -347,9 +356,22 @@ export function AppSidebar() {
 
           {user ? (
             loadingSheets ? (
-              <div className="flex min-h-16 items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin text-primary" />
-                <span>Loading...</span>
+              <div className="space-y-1.5 mt-1 px-0.5" aria-label="Loading saved calculations">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border/40 bg-muted/20 animate-pulse"
+                  >
+                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                      <div className="size-2 rounded-full bg-muted-foreground/30 shrink-0" />
+                      <div
+                        className="h-3 rounded-md bg-muted-foreground/20"
+                        style={{ width: i === 1 ? '60%' : i === 2 ? '75%' : '50%' }}
+                      />
+                    </div>
+                    <div className="h-3 w-14 rounded-md bg-muted-foreground/20 shrink-0" />
+                  </div>
+                ))}
               </div>
             ) : sheets.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/80 p-3.5 text-center my-1 bg-muted/10">
@@ -396,14 +418,15 @@ export function AppSidebar() {
                         )}
                         <button
                           type="button"
-                          className="size-6 rounded-md text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-destructive/10 flex items-center justify-center transition-all"
-                          onClick={(e) => void handleDeleteSheet(e, sheet.id)}
+                          className="size-7 rounded-lg text-muted-foreground/40 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 hover:text-destructive hover:bg-destructive/10 active:scale-95 flex items-center justify-center transition-all cursor-pointer shrink-0"
+                          onClick={(e) => void handleDeleteSheet(e, sheet)}
                           title={t('deleteSheet')}
+                          aria-label={t('deleteSheet')}
                         >
                           {isDeletingThis ? (
-                            <Loader2 className="size-3 animate-spin" />
+                            <Loader2 className="size-3.5 animate-spin" />
                           ) : (
-                            <Trash2 className="size-3" />
+                            <Trash2 className="size-3.5" />
                           )}
                         </button>
                       </div>
@@ -841,6 +864,15 @@ export function AppSidebar() {
           </div>
         </div>
       )}
+
+      {/* Modern Custom Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        open={Boolean(sheetToDelete)}
+        onOpenChange={(isOpen) => !isOpen && setSheetToDelete(null)}
+        sheetName={sheetToDelete?.name || ''}
+        deleting={Boolean(sheetToDelete && deletingId === sheetToDelete.id)}
+        onConfirm={handleConfirmDeleteSheet}
+      />
     </>
   );
 }

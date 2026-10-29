@@ -35,6 +35,9 @@ export async function generateMetadata({params}: {params: Promise<{locale: strin
   };
 }
 
+import { cookies } from 'next/headers';
+import { cn } from 'cn';
+
 export default async function LocaleLayout({
   children,
   params
@@ -49,18 +52,40 @@ export default async function LocaleLayout({
  
   const messages = await getMessages();
 
+  // Read theme cookie on server so SSR and language switches never flash light mode
+  const cookieStore = await cookies();
+  const themeCookie =
+    cookieStore.get('truemargin-theme')?.value ||
+    cookieStore.get('theme')?.value;
+  const isDark = themeCookie === 'dark';
+
   // Fetch initial auth state
   const supabase = await import('@/lib/supabase/server').then(mod => mod.createClient());
   const { data: { session } } = await supabase.auth.getSession();
   const user = session?.user ?? null;
 
   return (
-    <html lang={locale} suppressHydrationWarning className={`${plusJakartaSans.variable} ${notoSansSinhala.variable} h-full antialiased bg-background text-foreground`}>
+    <html
+      lang={locale}
+      suppressHydrationWarning
+      className={cn(
+        plusJakartaSans.variable,
+        notoSansSinhala.variable,
+        isDark && 'dark',
+        'h-full antialiased bg-background text-foreground'
+      )}
+      style={{ colorScheme: isDark ? 'dark' : 'light' }}
+    >
       <head>
         <meta name="darkreader-lock" content="" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var m=document.cookie.match(/(?:^|; )truemargin-theme=([^;]*)/);var v=m?decodeURIComponent(m[1]):localStorage.getItem('truemargin-theme')||localStorage.getItem('theme');var d=v==='dark';var el=document.documentElement;if(d){el.classList.add('dark');el.style.colorScheme='dark';document.cookie='truemargin-theme=dark; path=/; max-age=31536000; SameSite=Lax';document.cookie='theme=dark; path=/; max-age=31536000; SameSite=Lax';}else if(v==='light'){el.classList.remove('dark');el.style.colorScheme='light';document.cookie='truemargin-theme=light; path=/; max-age=31536000; SameSite=Lax';document.cookie='theme=light; path=/; max-age=31536000; SameSite=Lax';}if(typeof MutationObserver!=='undefined'){var mo=new MutationObserver(function(){var ck=document.cookie.match(/(?:^|; )truemargin-theme=([^;]*)/);var cur=ck?decodeURIComponent(ck[1]):(localStorage.getItem('truemargin-theme')||localStorage.getItem('theme'));if(cur==='dark'&&!el.classList.contains('dark')){el.classList.add('dark');el.style.colorScheme='dark';}});mo.observe(el,{attributes:true,attributeFilter:['class']});}}catch(e){}})();`,
+          }}
+        />
       </head>
       <body className="min-h-full flex flex-col font-sans bg-background text-foreground" suppressHydrationWarning>
-        <ThemeProvider>
+        <ThemeProvider initialTheme={isDark ? 'dark' : 'light'}>
           <NextIntlClientProvider messages={messages}>
             <AuthProvider initialUser={user} initialSession={session}>
               <AppShell>

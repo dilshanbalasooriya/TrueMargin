@@ -16,10 +16,11 @@ router = APIRouter(tags=["Exports & Documentation"])
 )
 def export_version_csv(
     version_id: uuid.UUID,
+    locale: str = "en",
     user_id: uuid.UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    return export_service.generate_csv_export(version_id, user_id, db)
+    return export_service.generate_csv_export(version_id, user_id, db, locale=locale)
 
 
 @router.get(
@@ -29,7 +30,8 @@ def export_version_csv(
 )
 def export_version_pdf(
     version_id: uuid.UUID,
+    locale: str = "en",
     user_id: uuid.UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> Response:
-    return export_service.generate_html_summary(version_id, user_id, db)
+    return export_service.generate_html_summary(version_id, user_id, db, locale=locale)

@@ -68,4 +68,5 @@ def sync_user_profile(
         db,
         display_name=payload.display_name if payload else None,
         currency=payload.currency if payload else None,
+        country=payload.country if payload else None,
     )

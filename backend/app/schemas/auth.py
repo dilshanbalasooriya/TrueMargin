@@ -19,6 +19,7 @@ class UserLoginRequest(BaseModel):
 class UserSyncRequest(BaseModel):
     display_name: Optional[str] = None
     currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$")
+    country: Optional[str] = None
 
 
 class AuthTokenResponse(BaseModel):

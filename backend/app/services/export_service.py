@@ -2,15 +2,148 @@ import csv
 from html import escape
 import io
 import json
+from pathlib import Path
 import uuid
 from decimal import Decimal
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import HTTPException, status
 from fastapi.responses import StreamingResponse, Response
 from sqlmodel import Session
+import jinja2
 
 from app.models import SheetVersion, CostSheet
 from app.services.cost_sheet_service import cost_sheet_service
+
+# Load Jinja2 templates directory
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+jinja_env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=jinja2.select_autoescape(["html", "xml"]),
+)
+
+# Internationalization mappings for reports
+REPORT_TRANSLATIONS: Dict[str, Dict[str, Any]] = {
+    "en": {
+        "doc_title": "Executive Cost Sheet Document",
+        "doc_subtitle": "Ready for Print & PDF Export",
+        "doc_type": "Executive Costing & Margin Analysis",
+        "doc_date": "Document Date",
+        "basis": "Basis",
+        "basis_batch": "Batch Basis",
+        "basis_monthly": "Monthly Basis",
+        "currency": "Currency",
+        "sold_as": "Sold as",
+        "cost_perspective": "Cost Perspective",
+        "perspective_economic": "Full Economic Cost",
+        "perspective_cash": "Cash-Only Cost",
+        "version": "Version",
+        "unit_cost": "Unit Cost",
+        "cash_unit_cost": "Cash",
+        "suggested_price": "Suggested Product Price",
+        "delivered_price": "Delivered",
+        "profit_per_unit": "Profit Per Unit",
+        "pricing_markup": "Markup",
+        "pricing_margin": "Margin",
+        "production_output": "Production Output",
+        "good_units": "Good Units",
+        "total_cost": "Total Cost",
+        "cost_distribution": "Cost Distribution Structure",
+        "breakdown_title": "Itemized Cost Buckets Breakdown",
+        "break_even": "Break-Even Quantity",
+        "units": "units",
+        "split_required": "Fixed/variable split required",
+        "not_reached": "Not reachable at this price",
+        "col_item": "Line Item",
+        "col_qty": "Quantity / Unit",
+        "col_unit_price": "Unit Price",
+        "col_total": "Total",
+        "col_behavior": "Behavior",
+        "col_cost_type": "Cost Type",
+        "behavior_variable": "Variable",
+        "behavior_fixed": "Fixed",
+        "type_cash": "Cash",
+        "type_imputed": "Imputed",
+        "lump_sum": "Lump Sum",
+        "lump_sum_entry": "Lump-sum allocation entry",
+        "loss_warning_title": "Attention: Pricing Warning",
+        "loss_warning_desc": "The configured selling price is below the economic unit cost. Adjust your margin or reduce cost drivers to maintain profitability.",
+        "version_note": "Version Note",
+        "footer_system": "TrueMargin Automated Cost Intelligence System · Confidential Report",
+        "footer_page": "Generated for",
+        "btn_download_pdf": "Download PDF File",
+        "btn_print": "Print Document",
+        "generating_pdf": "Generating PDF…",
+        "categories": {
+            "material": "Materials",
+            "labor": "Labor",
+            "transport": "Transport",
+            "overhead": "Overhead",
+            "machinery": "Machinery & Equipment",
+            "custom_fees": "Custom Fees",
+            "other": "Other Costs",
+        },
+    },
+    "si": {
+        "doc_title": "විධායක පිරිවැය සහ ලාභ ආන්තික වාර්තාව",
+        "doc_subtitle": "මුද්‍රණයට සහ PDF බාගත කිරීමට සූදානම්",
+        "doc_type": "විධායක පිරිවැය සහ ලාභ ආන්තික විශ්ලේෂණය",
+        "doc_date": "ලේඛනගත දිනය",
+        "basis": "පදනම",
+        "basis_batch": "කාණ්ඩ පදනම (Batch)",
+        "basis_monthly": "මාසික පදනම (Monthly)",
+        "currency": "මුදල් වර්ගය",
+        "sold_as": "විකිණුම් ඒකකය",
+        "cost_perspective": "පිරිවැය දෘෂ්ටිය",
+        "perspective_economic": "සම්පූර්ණ ආර්ථික පිරිවැය",
+        "perspective_cash": "සෘජු මුදල් පිරිවැය",
+        "version": "සංශෝධනය",
+        "unit_cost": "ඒකකයක පිරිවැය",
+        "cash_unit_cost": "සෘජු මුදල්",
+        "suggested_price": "යෝජිත නිෂ්පාදන මිල",
+        "delivered_price": "බෙදාහැරීම සහිත",
+        "profit_per_unit": "ඒකකයක ලාභය",
+        "pricing_markup": "මිල වැඩි කිරීම (Markup)",
+        "pricing_margin": "ලාභ ආන්තිකය (Margin)",
+        "production_output": "නිෂ්පාදන ප්‍රමාණය",
+        "good_units": "දෝෂ රහිත ඒකක",
+        "total_cost": "මුළු පිරිවැය",
+        "cost_distribution": "පිරිවැය බෙදීයාමේ ව්‍යුහය",
+        "breakdown_title": "කාණ්ඩගත පිරිවැය අයිතම විග්‍රහය",
+        "break_even": "ලාභ-අලාභ නොවන සීමාව",
+        "units": "ඒකක",
+        "split_required": "ස්ථාවර/විචල්‍ය වෙන්කිරීම අවශ්‍යයි",
+        "not_reached": "ළඟා විය නොහැක",
+        "col_item": "පිරිවැය අයිතමය",
+        "col_qty": "ප්‍රමාණය / ඒකකය",
+        "col_unit_price": "ඒකක මිල",
+        "col_total": "මුළු එකතුව",
+        "col_behavior": "ස්වභාවය",
+        "col_cost_type": "පිරිවැය වර්ගය",
+        "behavior_variable": "විචල්‍ය",
+        "behavior_fixed": "ස්ථාවර",
+        "type_cash": "සෘජු මුදල්",
+        "type_imputed": "ඇස්තමේන්තුගත",
+        "lump_sum": "තොග එකතුව",
+        "lump_sum_entry": "තොග ප්‍රතිපාදන සටහන",
+        "loss_warning_title": "අවධානයට: මිල අනතුරු ඇඟවීමයි",
+        "loss_warning_desc": "වින්‍යාස කරන ලද විකුණුම් මිල සම්පූර්ණ ඒකක පිරිවැයට වඩා අඩුය. ලාභදායීතාවය පවත්වා ගැනීමට ඔබේ ලාභ ආන්තිකය වැඩි කරන්න හෝ පිරිවැය අඩු කරන්න.",
+        "version_note": "සංශෝධන සටහන",
+        "footer_system": "TrueMargin ස්වයංක්‍රීය පිරිවැය බුද්ධි පද්ධතිය · රහස්‍ය වාර්තාවකි",
+        "footer_page": "සඳහා නිර්මාණය කරන ලදී",
+        "btn_download_pdf": "PDF ගොනුව බාගන්න",
+        "btn_print": "ලේඛනය මුද්‍රණය කරන්න",
+        "generating_pdf": "PDF සකසමින්…",
+        "categories": {
+            "material": "අමුද්‍රව්‍ය පිරිවැය",
+            "labor": "ශ්‍රම පිරිවැය",
+            "transport": "ප්‍රවාහන පිරිවැය",
+            "overhead": "පොදු කාර්ය පිරිවැය",
+            "machinery": "යන්ත්‍ර සූත්‍ර හා උපකරණ",
+            "custom_fees": "වෙනත් විශේෂිත ගාස්තු",
+            "other": "වෙනත් පිරිවැය",
+        },
+    },
+}
 
 
 class ExportService:
@@ -18,8 +151,37 @@ class ExportService:
     def _html_text(value: Any) -> str:
         return escape(str(value if value is not None else ""), quote=True)
 
+    @staticmethod
+    def _fmt_money(value: Any, currency: str = "") -> str:
+        try:
+            val = Decimal(str(value if value is not None else 0))
+            formatted = f"{val:,.2f}"
+            return f"{currency} {formatted}".strip() if currency else formatted
+        except Exception:
+            return f"{currency} {value}".strip() if currency else str(value)
+
+    @staticmethod
+    def _fmt_qty(value: Any) -> str:
+        try:
+            val = Decimal(str(value if value is not None else 0))
+            if val == val.to_integral():
+                return f"{int(val):,}"
+            return f"{val:,.2f}".rstrip("0").rstrip(".")
+        except Exception:
+            return str(value or "0")
+
+    @staticmethod
+    def _fmt_percent(value: Any) -> str:
+        try:
+            val = Decimal(str(value if value is not None else 0))
+            if val == val.to_integral():
+                return f"{int(val)}%"
+            return f"{val:,.2f}".rstrip("0").rstrip(".") + "%"
+        except Exception:
+            return f"{value}%"
+
     def generate_csv_export(
-        self, version_id: uuid.UUID, user_id: uuid.UUID, db: Session
+        self, version_id: uuid.UUID, user_id: uuid.UUID, db: Session, locale: str = "en"
     ) -> StreamingResponse:
         """
         Generates an accounting-grade CSV breakdown of a cost sheet version.
@@ -33,12 +195,13 @@ class ExportService:
 
         sheet = cost_sheet_service.verify_sheet_access(version.sheet_id, user_id, "viewer", db)
         snap = version.totals_snapshot
+        t = REPORT_TRANSLATIONS.get(locale, REPORT_TRANSLATIONS["en"])
 
         output = io.StringIO()
         writer = csv.writer(output)
 
         # Header Metadata
-        writer.writerow(["COST SHEET BREAKDOWN REPORT"])
+        writer.writerow([t["doc_title"].upper()])
         writer.writerow(["Sheet Name", sheet.name])
         writer.writerow(["Version Number", f"v{version.version_number}"])
         writer.writerow(["Change Note", version.change_note or "N/A"])
@@ -51,75 +214,50 @@ class ExportService:
         writer.writerow(["Units Produced", str(version.units_produced)])
         writer.writerow(["Defective Units", str(version.defective_units)])
         writer.writerow(["Good Units", str(snap.get("good_units", 0))])
-        writer.writerow(["Total Cost", str(snap.get("total_cost", "0.0000"))])
-        writer.writerow(["Unit Cost", str(snap.get("unit_cost", "0.0000"))])
-        writer.writerow(["Cost View", snap.get("cost_view", "economic")])
-        writer.writerow(["Cash Total Cost", str(snap.get("cash_total_cost", snap.get("total_cost", 0)))])
-        writer.writerow(["Economic Total Cost", str(snap.get("economic_total_cost", snap.get("total_cost", 0)))])
-        writer.writerow(["Cash Unit Cost", str(snap.get("cash_unit_cost", snap.get("unit_cost", 0)))])
-        writer.writerow(["Economic Unit Cost", str(snap.get("economic_unit_cost", snap.get("unit_cost", 0)))])
-        writer.writerow(["Seller-Paid Delivery per Unit", str(snap.get("seller_paid_delivery_per_unit", 0))])
-        writer.writerow(["Customer-Paid Delivery per Unit", str(snap.get("customer_paid_delivery_per_unit", 0))])
+        writer.writerow(["Total Cost", str(snap.get("total_cost", "0.00"))])
+        writer.writerow(["Unit Cost", str(snap.get("unit_cost", "0.00"))])
+        writer.writerow(["Cash Unit Cost", str(snap.get("cash_unit_cost", "0.00"))])
+        writer.writerow(["Suggested Product Price", str(snap.get("suggested_product_price", "0.00"))])
+        writer.writerow(["Suggested Delivered Price", str(snap.get("suggested_delivered_price", "0.00"))])
         writer.writerow(["Pricing Type", snap.get("pricing_type", "markup")])
         writer.writerow(["Pricing Percentage", f"{snap.get('pricing_percentage', 0)}%"])
-        target_price = snap.get("target_selling_price")
-        writer.writerow(["Target Selling Price", str(target_price if target_price is not None else "N/A")])
-        writer.writerow(["Suggested Product Price", str(snap.get("suggested_product_price", snap.get("suggested_price", "0.0000")))])
-        writer.writerow(["Suggested Delivered Price", str(snap.get("suggested_delivered_price", snap.get("suggested_price", "0.0000")))])
-        writer.writerow(["Profit Per Unit", str(snap.get("profit_per_unit", "0.0000"))])
-        break_even_units = snap.get("break_even_units")
-        break_even_status = (
-            str(break_even_units)
-            if break_even_units is not None
-            else "Not reached"
-            if snap.get("break_even_ready", False)
-            else "Level 3 cost split incomplete"
-        )
-        writer.writerow(["Break-even Units", break_even_status])
-        writer.writerow(["Loss Making", str(snap.get("is_loss_making", False))])
+        writer.writerow(["Profit Per Unit", str(snap.get("profit_per_unit", "0.00"))])
+        writer.writerow(["Break Even Units", str(snap.get("break_even_units", "N/A"))])
         writer.writerow([])
 
-        # Itemized Bill of Materials & Cost Buckets
-        writer.writerow(["ITEMIZED BUCKET BREAKDOWN"])
+        # Itemized Breakdown
+        writer.writerow(["ITEMIZED COST BREAKDOWN"])
         writer.writerow([
-            "Bucket Type",
-            "Bucket Label",
+            "Category",
             "Item Name",
             "Quantity",
-            "Unit",
+            "Unit of Measure",
             "Unit Price",
             "Total Amount",
-            "Item Kind",
-            "Imputed",
+            "Cost Behavior",
+            "Is Imputed",
             "Fixed Amount",
             "Variable Amount",
-            "Advanced Details",
+            "Details (JSON)",
         ])
 
         for bucket in snap.get("bucket_breakdown", []):
-            b_type = bucket.get("type")
-            b_label = bucket.get("label")
+            b_type = bucket.get("type", "other")
+            b_label = t["categories"].get(b_type, bucket.get("label", b_type))
             items = bucket.get("items", [])
-
             if not items:
-                effective_total = Decimal(str(bucket.get("effective_total", 0)))
-                fixed_total = Decimal(str(bucket.get(
-                    "fixed_economic_total" if snap.get("cost_view") == "economic" else "fixed_cash_total",
-                    effective_total if bucket.get("cost_behavior") == "fixed" else 0,
-                )))
                 writer.writerow([
-                    b_type,
                     b_label,
-                    "[Bucket Lump Sum]",
+                    "Lump Sum Allocation",
                     "1",
-                    "batch",
+                    "lump",
                     str(bucket.get("effective_total", 0)),
                     str(bucket.get("effective_total", 0)),
-                    "declared",
+                    "fixed",
                     "False",
-                    str(fixed_total),
-                    str(effective_total - fixed_total),
-                    "",
+                    str(bucket.get("effective_total", 0)),
+                    "0.00",
+                    "{}",
                 ])
             else:
                 for item in items:
@@ -129,14 +267,13 @@ class ExportService:
                         amount if item.get("cost_behavior") == "fixed" else 0,
                     )))
                     writer.writerow([
-                        b_type,
                         b_label,
-                        item.get("name"),
-                        str(item.get("quantity", 1)),
-                        item.get("unit") or "-",
-                        str(item.get("unit_price", 0)),
-                        str(item.get("amount", 0)),
-                        item.get("kind", "user"),
+                        item.get("name", ""),
+                        str(item.get("quantity", "")),
+                        item.get("unit", ""),
+                        str(item.get("unit_price", "")),
+                        str(amount),
+                        item.get("cost_behavior", "variable"),
                         str(item.get("is_imputed", False)),
                         str(fixed_amount),
                         str(amount - fixed_amount),
@@ -153,10 +290,11 @@ class ExportService:
         )
 
     def generate_html_summary(
-        self, version_id: uuid.UUID, user_id: uuid.UUID, db: Session
+        self, version_id: uuid.UUID, user_id: uuid.UUID, db: Session, locale: str = "en"
     ) -> Response:
         """
-        Generates a clean HTML print view for PDF rendering or browser print/save.
+        Generates an executive-grade HTML print view rendered from a clean Jinja2 template.
+        Supports both English ('en') and Sinhala ('si') natively with client-side PDF downloads.
         """
         version = db.get(SheetVersion, version_id)
         if not version:
@@ -168,92 +306,167 @@ class ExportService:
         sheet = cost_sheet_service.verify_sheet_access(version.sheet_id, user_id, "viewer", db)
         snap = version.totals_snapshot
         currency_code = snap.get("currency_code", "LKR")
+        is_si = locale == "si"
+        t = REPORT_TRANSLATIONS.get(locale, REPORT_TRANSLATIONS["en"])
 
-        buckets_html = ""
+        created_str = (
+            version.created_at.strftime("%Y-%m-%d · %H:%M")
+            if version.created_at
+            else "N/A"
+        )
+
+        total_cost_dec = Decimal(str(snap.get("total_cost", 0)))
+        bucket_colors = {
+            "material": "#2563eb",
+            "labor": "#059669",
+            "overhead": "#d97706",
+            "transport": "#7c3aed",
+            "machinery": "#db2777",
+            "custom_fees": "#0891b2",
+        }
+
+        # Build visual cost distribution bars and legend
+        bars = []
+        legends = []
         for b in snap.get("bucket_breakdown", []):
-            items_html = ""
-            for item in b.get("items", []):
+            b_type = b.get("type", "other")
+            color = bucket_colors.get(b_type, "#64748b")
+            label = t["categories"].get(b_type, b.get("label", b_type))
+            items = b.get("items", [])
+            eff_val = Decimal(str(b.get("effective_total", 0)))
+            items_sum = sum((Decimal(str(it.get("amount", 0))) for it in items), Decimal(0))
+            category_total = max(eff_val, items_sum)
+            pct = (category_total / total_cost_dec * 100) if total_cost_dec > 0 else Decimal(0)
+            if pct > 0:
+                bars.append({
+                    "pct": f"{pct:.1f}",
+                    "color": color,
+                    "label": label,
+                })
+                legends.append({
+                    "pct": f"{pct:.1f}",
+                    "color": color,
+                    "label": label,
+                })
+
+        # Process buckets and items
+        buckets_data = []
+        for b in snap.get("bucket_breakdown", []):
+            b_type = b.get("type", "other")
+            color = bucket_colors.get(b_type, "#0284c7")
+            label = t["categories"].get(b_type, b.get("label", b_type))
+            items = b.get("items", [])
+            eff_val = Decimal(str(b.get("effective_total", 0)))
+            items_sum = sum((Decimal(str(it.get("amount", 0))) for it in items), Decimal(0))
+            category_total = max(eff_val, items_sum)
+            pct_of_total = (category_total / total_cost_dec * 100) if total_cost_dec > 0 else Decimal(0)
+
+            items_list = []
+            for item in items:
                 amount = Decimal(str(item.get("amount", 0)))
+                qty = Decimal(str(item.get("quantity", 1) or 1))
+                raw_unit_price = item.get("unit_price")
+                if raw_unit_price is not None and Decimal(str(raw_unit_price)) > 0:
+                    unit_price_val = self._fmt_money(raw_unit_price)
+                elif qty > 0 and amount > 0:
+                    unit_price_val = self._fmt_money(amount / qty)
+                else:
+                    unit_price_val = "—"
+
                 fixed_amount = Decimal(str(item.get(
                     "fixed_amount",
                     amount if item.get("cost_behavior") == "fixed" else 0,
                 )))
-                items_html += f"""
-                <tr>
-                    <td>{self._html_text(item.get('name'))}</td>
-                    <td>{self._html_text(item.get('quantity'))} {self._html_text(item.get('unit') or '')}</td>
-                    <td>{self._html_text(item.get('unit_price'))}</td>
-                    <td><strong>{self._html_text(item.get('amount'))}</strong></td>
-                    <td>{self._html_text(str(fixed_amount))}</td>
-                    <td>{self._html_text(str(amount - fixed_amount))}</td>
-                    <td>{self._html_text('Imputed' if item.get('is_imputed') else 'Cash')}</td>
-                </tr>
-                """
+                variable_amount = amount - fixed_amount
+                is_fixed = fixed_amount > 0 and variable_amount == 0
+                is_imputed = bool(item.get("is_imputed"))
 
-            buckets_html += f"""
-            <div class="bucket-section">
-                <h3>{self._html_text(b.get('label'))} ({self._html_text(str(b.get('type', '')).capitalize())}) - Total: {self._html_text(currency_code)} {self._html_text(b.get('effective_total'))}</h3>
-                <table>
-                    <thead>
-                        <tr><th>Item</th><th>Purchase qty/unit</th><th>Unit Price</th><th>Amount</th><th>Fixed</th><th>Variable</th><th>Cost treatment</th></tr>
-                    </thead>
-                    <tbody>
-                        {items_html or "<tr><td colspan='5'>Lump sum bucket entry</td></tr>"}
-                    </tbody>
-                </table>
-            </div>
-            """
+                qty_formatted = self._fmt_qty(qty)
+                unit_label = item.get("unit") or ""
+                qty_unit_str = f"{qty_formatted} {unit_label}".strip() if unit_label else qty_formatted
 
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>{self._html_text(sheet.name)} - Version {version.version_number}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 40px; color: #333; }}
-                h1 {{ margin-bottom: 5px; }}
-                .meta {{ color: #666; margin-bottom: 20px; }}
-                .summary-card {{ background: #f4f6f8; padding: 20px; border-radius: 8px; margin-bottom: 30px; }}
-                .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }}
-                .summary-item label {{ font-size: 12px; color: #666; display: block; }}
-                .summary-item value {{ font-size: 18px; font-weight: bold; }}
-                .loss-warning {{ color: #b91c1c; font-weight: bold; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f8f9fa; }}
-                .bucket-section {{ margin-bottom: 25px; }}
-            </style>
-        </head>
-        <body>
-            <h1>{self._html_text(sheet.name)}</h1>
-            <div class="meta">Version {version.version_number} | Basis: {self._html_text(sheet.basis)} | Cost view: {self._html_text(snap.get('cost_view', 'economic'))} | Note: {self._html_text(version.change_note or 'N/A')}</div>
-            
-            <div class="summary-card">
-                <h2>Production & Pricing Summary</h2>
-                <div class="summary-grid">
-                    <div class="summary-item"><label>Units Produced</label><value>{self._html_text(version.units_produced)}</value></div>
-                    <div class="summary-item"><label>Good Units</label><value>{self._html_text(snap.get('good_units', 0))}</value></div>
-                    <div class="summary-item"><label>Total Batch Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('total_cost'))}</value></div>
-                    <div class="summary-item"><label>Cash Total Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('cash_total_cost', snap.get('total_cost')))}</value></div>
-                    <div class="summary-item"><label>Economic Total Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('economic_total_cost', snap.get('total_cost')))}</value></div>
-                    <div class="summary-item"><label>Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('unit_cost'))}</value></div>
-                    <div class="summary-item"><label>Cash Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('cash_unit_cost', snap.get('unit_cost')))}</value></div>
-                    <div class="summary-item"><label>Economic Unit Cost</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('economic_unit_cost', snap.get('unit_cost')))}</value></div>
-                    <div class="summary-item"><label>Seller-Paid Delivery / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('seller_paid_delivery_per_unit', 0))}</value></div>
-                    <div class="summary-item"><label>Customer-Paid Delivery / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('customer_paid_delivery_per_unit', 0))}</value></div>
-                    <div class="summary-item"><label>Suggested Product Price</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('suggested_product_price', snap.get('suggested_price')))}</value></div>
-                    <div class="summary-item"><label>Suggested Delivered Price</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('suggested_delivered_price', snap.get('suggested_price')))}</value></div>
-                    <div class="summary-item"><label>Profit / Unit</label><value>{self._html_text(currency_code)} {self._html_text(snap.get('profit_per_unit'))}</value></div>
-                    <div class="summary-item"><label>Break-even Units</label><value>{self._html_text(snap.get('break_even_units') if snap.get('break_even_units') is not None else 'Not reached' if snap.get('break_even_ready', False) else 'Level 3 cost split incomplete')}</value></div>
-                </div>
-                {f"<p class='loss-warning'>Warning: the selling price is below the selected cost per unit.</p>" if snap.get('is_loss_making') else ""}
-            </div>
+                items_list.append({
+                    "name": item.get("name"),
+                    "qty_unit_str": qty_unit_str,
+                    "unit_price_str": unit_price_val,
+                    "amount_str": self._fmt_money(amount),
+                    "is_variable": not is_fixed,
+                    "is_imputed": is_imputed,
+                })
 
-            <h2>Cost Breakdown</h2>
-            {buckets_html}
-        </body>
-        </html>
-        """
+            if items:
+                badge_text = f"{len(items)} {'අයිතම' if is_si else 'items'}"
+            else:
+                badge_text = t["lump_sum"]
+
+            if pct_of_total > 0:
+                badge_text += f" · {pct_of_total:.1f}%"
+
+            buckets_data.append({
+                "label": label,
+                "color": color,
+                "badge_text": badge_text,
+                "total_str": self._fmt_money(category_total, currency_code),
+                "items": items_list,
+            })
+
+        # Break even computation
+        be_units = snap.get("break_even_units")
+        if be_units is not None:
+            break_even_str = f"{self._fmt_qty(be_units)} {t['units']}"
+        elif snap.get("break_even_ready", False):
+            break_even_str = t["not_reached"]
+        else:
+            break_even_str = t["split_required"]
+
+        # Meta and Labels
+        basis_label = t["basis_batch"] if sheet.basis == "batch" else t["basis_monthly"]
+        cost_perspective_label = (
+            t["perspective_economic"]
+            if snap.get("cost_view", "economic") == "economic"
+            else t["perspective_cash"]
+        )
+        pricing_type_label = (
+            t["pricing_markup"]
+            if snap.get("pricing_type", "markup") == "markup"
+            else t["pricing_margin"]
+        )
+
+        safe_sheet_name = sheet.name.replace(" ", "_")
+        pdf_filename = f"{safe_sheet_name}_v{version.version_number}.pdf"
+
+        # Assemble template context
+        context = {
+            "locale": locale,
+            "t": t,
+            "sheet": sheet,
+            "version": version,
+            "snap": snap,
+            "currency_code": currency_code,
+            "created_str": created_str,
+            "basis_label": basis_label,
+            "cost_perspective_label": cost_perspective_label,
+            "pricing_type_label": pricing_type_label,
+            "break_even_str": break_even_str,
+            "unit_cost_str": self._fmt_money(snap.get("unit_cost"), currency_code),
+            "cash_unit_cost_str": self._fmt_money(snap.get("cash_unit_cost", snap.get("unit_cost")), currency_code),
+            "suggested_product_price_str": self._fmt_money(snap.get("suggested_product_price", snap.get("suggested_price")), currency_code),
+            "suggested_delivered_price_str": self._fmt_money(snap.get("suggested_delivered_price", snap.get("suggested_price")), currency_code),
+            "profit_per_unit_str": self._fmt_money(snap.get("profit_per_unit"), currency_code),
+            "pricing_pct_str": self._fmt_percent(snap.get("pricing_percentage", 0)),
+            "units_produced_str": self._fmt_qty(version.units_produced),
+            "good_units_str": self._fmt_qty(snap.get("good_units", 0)),
+            "total_cost_str": self._fmt_money(snap.get("total_cost"), currency_code),
+            "distribution": {
+                "bars": bars,
+                "legends": legends,
+            },
+            "buckets": buckets_data,
+            "pdf_filename": pdf_filename,
+        }
+
+        template = jinja_env.get_template("cost_sheet_report.html")
+        html_content = template.render(context)
 
         return Response(content=html_content, media_type="text/html")
 

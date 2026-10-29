@@ -34,6 +34,7 @@ export interface GuestDraft {
   buckets: Record<string, BucketDraft>;
   sheetId?: string;
   versionId?: string;
+  versionNumber?: number;
   workspaceId?: string;
 }
 
